@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:17
+    container_name: mychat-db
+    environment:
+      POSTGRES_USER: mychat
+      POSTGRES_PASSWORD: mychat_dev_pw
+      POSTGRES_DB: mychat
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

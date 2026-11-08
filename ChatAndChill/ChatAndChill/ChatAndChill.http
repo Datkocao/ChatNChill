@@ -1,0 +1,6 @@
+@ChatAndChill_HostAddress = http://localhost:5211
+
+GET {{ChatAndChill_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
