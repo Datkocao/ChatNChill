@@ -1,5 +1,7 @@
 ﻿using ChatAndChill.Models;
 using Microsoft.EntityFrameworkCore;
+using ChatAndChill.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace ChatAndChill.Data;
 
@@ -15,4 +17,4 @@ public class AppDbContext : DbContext
             .HasIndex(u => u.Username)
             .IsUnique();
     }
-}
+}   
