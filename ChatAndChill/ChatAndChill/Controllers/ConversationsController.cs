@@ -17,6 +17,29 @@ namespace ChatAndChill.Controllers;
 public class ConversationsController : ControllerBase
 {
     private const int MaxGroupMembers = 50;
+    private const long MaxUploadBytes = 10 * 1024 * 1024; // 10 MB
+
+    private static readonly Dictionary<string, string> AllowedTypes =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            // ảnh
+            [".jpg"] = "image/jpeg",
+            [".jpeg"] = "image/jpeg",
+            [".png"] = "image/png",
+            [".gif"] = "image/gif",
+            [".webp"] = "image/webp",
+            // file thường
+            [".pdf"] = "application/pdf",
+            [".txt"] = "text/plain",
+            [".zip"] = "application/zip",
+            [".doc"] = "application/msword",
+            [".docx"] = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            [".xls"] = "application/vnd.ms-excel",
+            [".xlsx"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            [".ppt"] = "application/vnd.ms-powerpoint",
+            [".pptx"] = "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            [".mp3"] = "audio/mpeg",
+        };
 
     private readonly AppDbContext _db;
     private readonly IHubContext<ChatHub> _hub;
@@ -65,6 +88,14 @@ public class ConversationsController : ControllerBase
             Name = other.DisplayName ?? other.Username,
             MemberCount = 2
         });
+        return Ok(new ConversationDto
+        {
+            Id = conv.Id,
+            Type = "direct",
+            Name = other.DisplayName ?? other.Username,
+            MemberCount = 2,
+            OtherUserId = other.Id // MỚI (nhớ thêm dấu phẩy sau MemberCount = 2)
+        });
     }
 
     // ---------- Danh sách và lịch sử ----------
@@ -87,6 +118,10 @@ public class ConversationsController : ControllerBase
                     .Where(m => m.UserId != me)
                     .Select(m => m.User.DisplayName ?? m.User.Username)
                     .FirstOrDefault(),
+                OtherUserId = c.Members
+                    .Where(m => m.UserId != me)
+                    .Select(m => (int?)m.UserId)
+                    .FirstOrDefault(),
                 Last = c.Messages
                     .OrderByDescending(x => x.Id)
                     .Select(x => new MessageDto
@@ -96,7 +131,11 @@ public class ConversationsController : ControllerBase
                         SenderId = x.SenderId,
                         SenderName = x.Sender.DisplayName ?? x.Sender.Username,
                         Content = x.Content,
-                        CreatedAt = x.CreatedAt
+                        CreatedAt = x.CreatedAt,
+                        AttachmentUrl = x.AttachmentPath == null ? null : "/uploads/" + x.AttachmentPath,
+                        AttachmentName = x.AttachmentName,
+                        AttachmentContentType = x.AttachmentContentType,
+                        AttachmentSize = x.AttachmentSize
                     })
                     .FirstOrDefault()
             })
@@ -113,6 +152,7 @@ public class ConversationsController : ControllerBase
                     : (r.Name ?? "Nhóm"),
                 MemberCount = r.MemberCount,
                 IsAdmin = r.IsAdmin,
+                OtherUserId = r.Type == ConversationType.Direct ? r.OtherUserId : null,
                 LastMessage = r.Last
             })
             .ToList();
@@ -143,7 +183,11 @@ public class ConversationsController : ControllerBase
                 SenderId = m.SenderId,
                 SenderName = m.Sender.DisplayName ?? m.Sender.Username,
                 Content = m.Content,
-                CreatedAt = m.CreatedAt
+                CreatedAt = m.CreatedAt,
+                AttachmentUrl = m.AttachmentPath == null ? null : "/uploads/" + m.AttachmentPath,
+                AttachmentName = m.AttachmentName,
+                AttachmentContentType = m.AttachmentContentType,
+                AttachmentSize = m.AttachmentSize
             })
             .ToListAsync();
 
@@ -151,6 +195,99 @@ public class ConversationsController : ControllerBase
         return Ok(items);
     }
 
+
+    // Ai đã đọc tới tin nào (dùng khi mở cuộc trò chuyện)
+    [HttpGet("{id:int}/reads")]
+    public async Task<ActionResult> GetReads(int id)
+    {
+        var me = User.GetUserId();
+        if (!await IsMemberAsync(id, me)) return Forbid();
+
+        var reads = await _db.ConversationMembers
+            .Where(m => m.ConversationId == id && m.UserId != me)
+            .Select(m => new { userId = m.UserId, lastReadMessageId = m.LastReadMessageId })
+            .ToListAsync();
+
+        return Ok(reads);
+    }
+
+
+    // Gửi tin có file đính kèm
+    [HttpPost("{id:int}/attachments")]
+    [RequestSizeLimit(MaxUploadBytes + 1024 * 1024)]
+    public async Task<ActionResult<MessageDto>> Upload(
+        int id, IFormFile file, [FromForm] string? content, [FromServices] IWebHostEnvironment env)
+    {
+        var me = User.GetUserId();
+        if (!await IsMemberAsync(id, me)) return Forbid();
+
+        if (file is null || file.Length == 0)
+            return BadRequest(new { message = "Chưa chọn file." });
+        if (file.Length > MaxUploadBytes)
+            return BadRequest(new { message = "File quá lớn (tối đa 10 MB)." });
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (!AllowedTypes.TryGetValue(ext, out var contentType))
+            return BadRequest(new { message = "Loại file này không được hỗ trợ." });
+
+        content = (content ?? "").Trim();
+        if (content.Length > 4000)
+            return BadRequest(new { message = "Tin nhắn quá dài (tối đa 4000 ký tự)." });
+
+        // lưu file với tên ngẫu nhiên, không dùng tên gốc
+        var folder = Path.Combine(env.ContentRootPath, "uploads");
+        Directory.CreateDirectory(folder);
+        var stored = $"{Guid.NewGuid():N}{ext}";
+        await using (var stream = System.IO.File.Create(Path.Combine(folder, stored)))
+        {
+            await file.CopyToAsync(stream);
+        }
+
+        var originalName = Path.GetFileName(file.FileName);
+        if (originalName.Length > 200) originalName = originalName[^200..];
+
+        var message = new Message
+        {
+            ConversationId = id,
+            SenderId = me,
+            Content = content,
+            AttachmentPath = stored,
+            AttachmentName = originalName,
+            AttachmentContentType = contentType,
+            AttachmentSize = file.Length
+        };
+        _db.Messages.Add(message);
+        await _db.SaveChangesAsync();
+
+        var senderName = await _db.Users
+            .Where(u => u.Id == me)
+            .Select(u => u.DisplayName ?? u.Username)
+            .FirstAsync();
+
+        var dto = new MessageDto
+        {
+            Id = message.Id,
+            ConversationId = id,
+            SenderId = me,
+            SenderName = senderName,
+            Content = message.Content,
+            CreatedAt = message.CreatedAt,
+            AttachmentUrl = "/uploads/" + stored,
+            AttachmentName = originalName,
+            AttachmentContentType = contentType,
+            AttachmentSize = file.Length
+        };
+
+        var memberIds = await _db.ConversationMembers
+            .Where(m => m.ConversationId == id)
+            .Select(m => m.UserId)
+            .ToListAsync();
+
+        await _hub.Clients.Groups(memberIds.Select(ChatHub.UserGroup).ToList())
+            .SendAsync("ReceiveMessage", dto);
+
+        return Ok(dto);
+    }
     // ---------- Nhóm ----------
 
     [HttpPost("group")]

@@ -2,7 +2,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { API_URL } from './config';
-import { ConversationDto, MemberDto, MessageDto } from './models';
+import { ConversationDto, MemberDto, MessageDto, ReadDto } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ChatApiService {
@@ -23,6 +23,17 @@ export class ChatApiService {
       params = params.set('before', before);
     }
     return this.http.get<MessageDto[]>(`${this.base}/${conversationId}/messages`, { params });
+  }
+
+    reads(conversationId: number): Observable<ReadDto[]> {
+    return this.http.get<ReadDto[]>(`${this.base}/${conversationId}/reads`);
+  }
+
+    upload(conversationId: number, file: File, content = ''): Observable<MessageDto> {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('content', content);
+    return this.http.post<MessageDto>(`${this.base}/${conversationId}/attachments`, form);
   }
 
   createGroup(name: string, usernames: string[]): Observable<ConversationDto> {

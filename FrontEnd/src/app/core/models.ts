@@ -5,6 +5,10 @@ export interface MessageDto {
   senderName: string;
   content: string;
   createdAt: string;
+  attachmentUrl?: string | null;
+  attachmentName?: string | null;
+  attachmentContentType?: string | null;
+  attachmentSize?: number | null;
 }
 
 export interface ConversationDto {
@@ -13,6 +17,7 @@ export interface ConversationDto {
   name: string;
   memberCount: number;
   isAdmin: boolean;
+  otherUserId: number | null;
   lastMessage: MessageDto | null;
 }
 
@@ -43,4 +48,10 @@ export interface UserSearchDto {
   username: string;
   displayName: string;
   relation: 'none' | 'friend' | 'incoming' | 'outgoing';
+}
+
+
+export interface ReadDto {
+  userId: number;
+  lastReadMessageId: number | null;
 }

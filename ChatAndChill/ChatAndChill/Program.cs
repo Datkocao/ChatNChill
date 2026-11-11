@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Microsoft.Extensions.FileProviders;
 
 namespace ChatAndChill
 {
@@ -107,6 +108,23 @@ namespace ChatAndChill
 
             app.UseHttpsRedirection();
             app.UseStaticFiles();
+
+            var uploadsPath = Path.Combine(builder.Environment.ContentRootPath, "uploads");
+            Directory.CreateDirectory(uploadsPath);
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = new PhysicalFileProvider(uploadsPath),
+                RequestPath = "/uploads",
+                OnPrepareResponse = ctx =>
+                {
+                    ctx.Context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+
+                    // file không phải ảnh thì ép trình duyệt tải về, không mở trực tiếp
+                    var ext = Path.GetExtension(ctx.File.Name).ToLowerInvariant();
+                    if (ext is not (".jpg" or ".jpeg" or ".png" or ".gif" or ".webp"))
+                        ctx.Context.Response.Headers["Content-Disposition"] = "attachment";
+                }
+            });
             app.UseCors("Frontend");
 
             app.UseAuthentication();

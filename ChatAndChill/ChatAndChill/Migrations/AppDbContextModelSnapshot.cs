@@ -55,6 +55,9 @@ namespace ChatAndChill.Migrations
                     b.Property<DateTime>("JoinedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<long?>("LastReadMessageId")
+                        .HasColumnType("bigint");
+
                     b.Property<int>("Role")
                         .HasColumnType("integer");
 
@@ -102,6 +105,18 @@ namespace ChatAndChill.Migrations
                         .HasColumnType("bigint");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AttachmentContentType")
+                        .HasColumnType("text");
+
+                    b.Property<string>("AttachmentName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("AttachmentPath")
+                        .HasColumnType("text");
+
+                    b.Property<long?>("AttachmentSize")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Content")
                         .IsRequired()

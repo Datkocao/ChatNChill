@@ -16,6 +16,10 @@ public class MessageDto
     public string SenderName { get; set; } = "";
     public string Content { get; set; } = "";
     public DateTime CreatedAt { get; set; }
+    public string? AttachmentUrl { get; set; }         // dạng /uploads/xxxx.png
+    public string? AttachmentName { get; set; }
+    public string? AttachmentContentType { get; set; }
+    public long? AttachmentSize { get; set; }
 }
 
 public class ConversationDto
@@ -25,6 +29,7 @@ public class ConversationDto
     public string Name { get; set; } = "";
     public int MemberCount { get; set; }
     public bool IsAdmin { get; set; }
+    public int? OtherUserId { get; set; } // chỉ có giá trị với chat 1-1
     public MessageDto? LastMessage { get; set; }
 
     public class MemberDto

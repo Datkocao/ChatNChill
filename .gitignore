@@ -486,3 +486,5 @@ $RECYCLE.BIN/
 # Secrets
 .env
 .env.*
+
+ChatAndChill/ChatAndChill/uploads/

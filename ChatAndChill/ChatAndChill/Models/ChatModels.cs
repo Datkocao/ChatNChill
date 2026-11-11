@@ -32,7 +32,9 @@ public class ConversationMember
 
     public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
     public MemberRole Role { get; set; } = MemberRole.Member;
+    public long? LastReadMessageId { get; set; } // tin cuối mà thành viên này đã đọc
 }
+
 
 public class Message
 {
@@ -45,5 +47,10 @@ public class Message
     public User Sender { get; set; } = null!;
 
     public string Content { get; set; } = "";
+    public string? AttachmentPath { get; set; }        // tên file trên đĩa (GUID + đuôi)
+    public string? AttachmentName { get; set; }        // tên gốc để hiển thị
+    public string? AttachmentContentType { get; set; } // ví dụ image/png
+    public long? AttachmentSize { get; set; }          // byte
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
+
