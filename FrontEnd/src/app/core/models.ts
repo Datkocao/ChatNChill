@@ -22,3 +22,25 @@ export interface MemberDto {
   displayName: string;
   isAdmin: boolean;
 }   
+
+export interface FriendDto {
+  userId: number;
+  username: string;
+  displayName: string;
+}
+
+export interface FriendRequestDto {
+  id: number;
+  userId: number;
+  username: string;
+  displayName: string;
+  direction: 'incoming' | 'outgoing';
+  createdAt: string;
+}
+
+export interface UserSearchDto {
+  userId: number;
+  username: string;
+  displayName: string;
+  relation: 'none' | 'friend' | 'incoming' | 'outgoing';
+}

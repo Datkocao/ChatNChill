@@ -49,6 +49,8 @@ public class ConversationsController : ControllerBase
 
         if (conv is null)
         {
+            if ((await NonFriendsAsync(me, new[] { other })).Count > 0)
+                return Deny("Hai bạn chưa là bạn bè. Hãy kết bạn trước khi nhắn tin.");
             conv = new Conversation { Type = ConversationType.Direct };
             conv.Members.Add(new ConversationMember { UserId = me });
             conv.Members.Add(new ConversationMember { UserId = other.Id });
@@ -166,6 +168,9 @@ public class ConversationsController : ControllerBase
         var missing = usernames.Except(users.Select(u => u.Username)).ToList();
         if (missing.Count > 0)
             return NotFound(new { message = $"Không tìm thấy người dùng: {string.Join(", ", missing)}" });
+        var notFriends = await NonFriendsAsync(me, users);
+        if (notFriends.Count > 0)
+            return Deny($"Chỉ thêm được bạn bè vào nhóm. Chưa là bạn bè: {string.Join(", ", notFriends)}");
 
         var memberIds = users.Select(u => u.Id).Append(me).Distinct().ToList();
         if (memberIds.Count < 3)
@@ -244,6 +249,9 @@ public class ConversationsController : ControllerBase
         var toAdd = users.Where(u => !existing.Contains(u.Id)).ToList();
         if (toAdd.Count == 0)
             return BadRequest(new { message = "Những người này đã ở trong nhóm." });
+        var notFriends = await NonFriendsAsync(me, toAdd);
+        if (notFriends.Count > 0)
+            return Deny($"Chỉ thêm được bạn bè vào nhóm. Chưa là bạn bè: {string.Join(", ", notFriends)}");
         if (existing.Count + toAdd.Count > MaxGroupMembers)
             return BadRequest(new { message = $"Nhóm tối đa {MaxGroupMembers} thành viên." });
 
@@ -375,4 +383,23 @@ public class ConversationsController : ControllerBase
 
     private ObjectResult Deny(string message) =>
         StatusCode(StatusCodes.Status403Forbidden, new { message });
+
+    // Trả về username của những người KHÔNG phải bạn bè của "me"
+    private async Task<List<string>> NonFriendsAsync(int me, IEnumerable<User> users)
+    {
+        var targets = users.Where(u => u.Id != me).ToList();
+        var ids = targets.Select(u => u.Id).ToList();
+
+        var friendIds = await _db.Friendships
+            .Where(f => f.Status == FriendshipStatus.Accepted
+                        && ((f.RequesterId == me && ids.Contains(f.AddresseeId))
+                            || (f.AddresseeId == me && ids.Contains(f.RequesterId))))
+            .Select(f => f.RequesterId == me ? f.AddresseeId : f.RequesterId)
+            .ToListAsync();
+
+        return targets
+            .Where(u => !friendIds.Contains(u.Id))
+            .Select(u => u.Username)
+            .ToList();
+    }
 }

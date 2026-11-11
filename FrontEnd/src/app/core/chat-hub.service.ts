@@ -16,7 +16,8 @@ export class ChatHubService {
   readonly state = signal<HubState>('disconnected');
   readonly messages$ = new Subject<MessageDto>();
   readonly reconnected$ = new Subject<void>();
-
+ readonly friendsChanged$ = new Subject<void>();
+ 
   async start(): Promise<void> {
     if (this.connection) return;
 
@@ -29,6 +30,7 @@ export class ChatHubService {
 
     conn.on('ReceiveMessage', (m: MessageDto) => this.messages$.next(m));
     conn.on('ConversationsChanged', () => this.conversationsChanged$.next());
+    conn.on('FriendsChanged', () => this.friendsChanged$.next());
     conn.onreconnecting(() => this.state.set('reconnecting'));
     conn.onreconnected(() => {
       this.state.set('connected');

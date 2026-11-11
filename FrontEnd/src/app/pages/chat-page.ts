@@ -16,6 +16,7 @@ import { AuthService } from '../core/auth.service';
 import { ChatApiService } from '../core/chat-api.service';
 import { ChatHubService } from '../core/chat-hub.service';
 import { ConversationDto, MemberDto, MessageDto } from '../core/models';
+import { FriendsPanel } from './friends-panel';
 
 const PAGE_SIZE = 30;
 
@@ -32,7 +33,7 @@ const errorText = (err: HttpErrorResponse, fallback: string): string =>
 @Component({
   selector: 'app-chat-page',
   standalone: true,
-  imports: [FormsModule, DatePipe],
+  imports: [FormsModule, DatePipe, FriendsPanel],
   template: `
     <div class="app">
       <aside class="side">
@@ -44,43 +45,10 @@ const errorText = (err: HttpErrorResponse, fallback: string): string =>
           <button type="button" class="ghost" (click)="logout()">Đăng xuất</button>
         </div>
 
-        <form class="new" (ngSubmit)="startChat()">
-          <input
-            name="newUser"
-            placeholder="Nhắn tới (tên đăng nhập)"
-            autocomplete="off"
-            [ngModel]="newUser()"
-            (ngModelChange)="newUser.set($event)"
-          />
-          <button type="submit" class="primary">Chat</button>
-        </form>
-
-        <button type="button" class="sidebtn" (click)="toggleCreate()">
-          {{ showCreate() ? 'Đóng' : '+ Tạo nhóm' }}
-        </button>
-
-        @if (showCreate()) {
-          <form class="panel" (ngSubmit)="createGroup()">
-            <input
-              name="groupName"
-              placeholder="Tên nhóm"
-              autocomplete="off"
-              [ngModel]="groupName()"
-              (ngModelChange)="groupName.set($event)"
-            />
-            <input
-              name="groupMembers"
-              placeholder="Thành viên: user1, user2, ..."
-              autocomplete="off"
-              [ngModel]="groupMembers()"
-              (ngModelChange)="groupMembers.set($event)"
-            />
-            @if (groupError()) {
-              <p class="error flat">{{ groupError() }}</p>
-            }
-            <button type="submit" class="primary">Tạo nhóm</button>
-          </form>
-        }
+        <app-friends-panel
+          (chat)="newUser.set($event); startChat()"
+          (groupCreated)="onGroupCreated($event)"
+        />
 
         @if (error()) {
           <p class="error">{{ error() }}</p>
@@ -350,6 +318,12 @@ export class ChatPage implements OnInit, OnDestroy {
 
   logout(): void {
     this.auth.logout();
+  }
+  onGroupCreated(conv: ConversationDto): void {
+    this.conversations.update(list =>
+      list.some(c => c.id === conv.id) ? list : [conv, ...list]
+    );
+    this.open(conv.id);
   }
 
   // ---------- Mở cuộc trò chuyện, tin nhắn ----------
