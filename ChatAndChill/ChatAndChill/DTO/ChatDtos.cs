@@ -23,5 +23,34 @@ public class ConversationDto
     public int Id { get; set; }
     public string Type { get; set; } = "";
     public string Name { get; set; } = "";
+    public int MemberCount { get; set; }
+    public bool IsAdmin { get; set; }
     public MessageDto? LastMessage { get; set; }
+
+    public class MemberDto
+    {
+        public int UserId { get; set; }
+        public string Username { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public bool IsAdmin { get; set; }
+    }
+
+    public class RenameRequest
+    {
+        [Required, StringLength(50, MinimumLength = 1)]
+        public string Name { get; set; } = "";
+    }
+
+    public class AddMembersRequest
+    {
+        public List<string> Usernames { get; set; } = new();
+    }
+
+    public class CreateGroupRequest
+    {
+        [Required, StringLength(50, MinimumLength = 1)]
+        public string Name { get; set; } = "";
+
+        public List<string> Usernames { get; set; } = new();
+    }
 }

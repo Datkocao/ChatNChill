@@ -1,10 +1,13 @@
 ﻿using ChatAndChill.Data;
 using ChatAndChill.Dtos;
 using ChatAndChill.Extensions;
+using ChatAndChill.Hubs;
 using ChatAndChill.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using static ChatAndChill.Dtos.ConversationDto;
 
 namespace ChatAndChill.Controllers;
 
@@ -13,14 +16,19 @@ namespace ChatAndChill.Controllers;
 [Route("api/[controller]")]
 public class ConversationsController : ControllerBase
 {
-    private readonly AppDbContext _db;
+    private const int MaxGroupMembers = 50;
 
-    public ConversationsController(AppDbContext db)
+    private readonly AppDbContext _db;
+    private readonly IHubContext<ChatHub> _hub;
+
+    public ConversationsController(AppDbContext db, IHubContext<ChatHub> hub)
     {
         _db = db;
+        _hub = hub;
     }
 
-    // Bắt đầu (hoặc mở lại) cuộc trò chuyện 1-1 với một username
+    // ---------- Chat 1-1 ----------
+
     [HttpPost("direct")]
     public async Task<ActionResult<ConversationDto>> StartDirect(StartDirectRequest req)
     {
@@ -52,11 +60,13 @@ public class ConversationsController : ControllerBase
         {
             Id = conv.Id,
             Type = "direct",
-            Name = other.DisplayName ?? other.Username
+            Name = other.DisplayName ?? other.Username,
+            MemberCount = 2
         });
     }
 
-    // Danh sách cuộc trò chuyện của tôi, kèm tin nhắn cuối
+    // ---------- Danh sách và lịch sử ----------
+
     [HttpGet]
     public async Task<ActionResult<List<ConversationDto>>> GetMine()
     {
@@ -69,6 +79,8 @@ public class ConversationsController : ControllerBase
                 c.Id,
                 c.Type,
                 c.Name,
+                MemberCount = c.Members.Count,
+                IsAdmin = c.Members.Any(m => m.UserId == me && m.Role == MemberRole.Admin),
                 OtherName = c.Members
                     .Where(m => m.UserId != me)
                     .Select(m => m.User.DisplayName ?? m.User.Username)
@@ -97,6 +109,8 @@ public class ConversationsController : ControllerBase
                 Name = r.Type == ConversationType.Direct
                     ? (r.OtherName ?? "Không rõ")
                     : (r.Name ?? "Nhóm"),
+                MemberCount = r.MemberCount,
+                IsAdmin = r.IsAdmin,
                 LastMessage = r.Last
             })
             .ToList();
@@ -104,16 +118,12 @@ public class ConversationsController : ControllerBase
         return Ok(result);
     }
 
-    // Lịch sử tin nhắn, phân trang: lấy các tin cũ hơn id "before"
     [HttpGet("{id:int}/messages")]
     public async Task<ActionResult<List<MessageDto>>> GetMessages(
         int id, [FromQuery] long? before, [FromQuery] int limit = 30)
     {
         var me = User.GetUserId();
-
-        var isMember = await _db.ConversationMembers
-            .AnyAsync(m => m.ConversationId == id && m.UserId == me);
-        if (!isMember) return Forbid();
+        if (!await IsMemberAsync(id, me)) return Forbid();
 
         limit = Math.Clamp(limit, 1, 100);
 
@@ -138,4 +148,231 @@ public class ConversationsController : ControllerBase
         items.Reverse();
         return Ok(items);
     }
+
+    // ---------- Nhóm ----------
+
+    [HttpPost("group")]
+    public async Task<ActionResult<ConversationDto>> CreateGroup(CreateGroupRequest req)
+    {
+        var me = User.GetUserId();
+
+        var name = req.Name.Trim();
+        if (name.Length == 0)
+            return BadRequest(new { message = "Tên nhóm không được để trống." });
+
+        var usernames = NormalizeUsernames(req.Usernames);
+        var users = await _db.Users.Where(u => usernames.Contains(u.Username)).ToListAsync();
+
+        var missing = usernames.Except(users.Select(u => u.Username)).ToList();
+        if (missing.Count > 0)
+            return NotFound(new { message = $"Không tìm thấy người dùng: {string.Join(", ", missing)}" });
+
+        var memberIds = users.Select(u => u.Id).Append(me).Distinct().ToList();
+        if (memberIds.Count < 3)
+            return BadRequest(new { message = "Nhóm cần ít nhất 3 người (bạn và 2 người khác)." });
+        if (memberIds.Count > MaxGroupMembers)
+            return BadRequest(new { message = $"Nhóm tối đa {MaxGroupMembers} thành viên." });
+
+        var conv = new Conversation { Type = ConversationType.Group, Name = name };
+        foreach (var userId in memberIds)
+        {
+            conv.Members.Add(new ConversationMember
+            {
+                UserId = userId,
+                Role = userId == me ? MemberRole.Admin : MemberRole.Member
+            });
+        }
+
+        _db.Conversations.Add(conv);
+        await _db.SaveChangesAsync();
+        await NotifyAsync(memberIds);
+
+        return Ok(new ConversationDto
+        {
+            Id = conv.Id,
+            Type = "group",
+            Name = name,
+            MemberCount = memberIds.Count,
+            IsAdmin = true
+        });
+    }
+
+    [HttpGet("{id:int}/members")]
+    public async Task<ActionResult<List<MemberDto>>> GetMembers(int id)
+    {
+        var me = User.GetUserId();
+        if (!await IsMemberAsync(id, me)) return Forbid();
+
+        var members = await _db.ConversationMembers
+            .Where(m => m.ConversationId == id)
+            .OrderByDescending(m => m.Role)
+            .ThenBy(m => m.JoinedAt)
+            .Select(m => new MemberDto
+            {
+                UserId = m.UserId,
+                Username = m.User.Username,
+                DisplayName = m.User.DisplayName ?? m.User.Username,
+                IsAdmin = m.Role == MemberRole.Admin
+            })
+            .ToListAsync();
+
+        return Ok(members);
+    }
+
+    [HttpPost("{id:int}/members")]
+    public async Task<ActionResult> AddMembers(int id, AddMembersRequest req)
+    {
+        var me = User.GetUserId();
+        var conv = await LoadForMemberAsync(id, me);
+        if (conv is null) return Forbid();
+
+        if (conv.Type != ConversationType.Group)
+            return BadRequest(new { message = "Chỉ thêm thành viên vào nhóm." });
+        if (!IsAdmin(conv, me))
+            return Deny("Chỉ quản trị viên mới được thêm thành viên.");
+
+        var usernames = NormalizeUsernames(req.Usernames);
+        if (usernames.Count == 0)
+            return BadRequest(new { message = "Chưa nhập tên đăng nhập nào." });
+
+        var users = await _db.Users.Where(u => usernames.Contains(u.Username)).ToListAsync();
+        var missing = usernames.Except(users.Select(u => u.Username)).ToList();
+        if (missing.Count > 0)
+            return NotFound(new { message = $"Không tìm thấy người dùng: {string.Join(", ", missing)}" });
+
+        var existing = conv.Members.Select(m => m.UserId).ToHashSet();
+        var toAdd = users.Where(u => !existing.Contains(u.Id)).ToList();
+        if (toAdd.Count == 0)
+            return BadRequest(new { message = "Những người này đã ở trong nhóm." });
+        if (existing.Count + toAdd.Count > MaxGroupMembers)
+            return BadRequest(new { message = $"Nhóm tối đa {MaxGroupMembers} thành viên." });
+
+        foreach (var user in toAdd)
+            conv.Members.Add(new ConversationMember { UserId = user.Id });
+
+        await _db.SaveChangesAsync();
+        await NotifyAsync(conv.Members.Select(m => m.UserId));
+
+        return NoContent();
+    }
+
+    [HttpDelete("{id:int}/members/{userId:int}")]
+    public async Task<ActionResult> RemoveMember(int id, int userId)
+    {
+        var me = User.GetUserId();
+        var conv = await LoadForMemberAsync(id, me);
+        if (conv is null) return Forbid();
+
+        if (conv.Type != ConversationType.Group)
+            return BadRequest(new { message = "Chỉ xoá thành viên trong nhóm." });
+        if (userId == me)
+            return BadRequest(new { message = "Muốn rời nhóm hãy dùng chức năng Rời nhóm." });
+        if (!IsAdmin(conv, me))
+            return Deny("Chỉ quản trị viên mới được xoá thành viên.");
+
+        var target = conv.Members.FirstOrDefault(m => m.UserId == userId);
+        if (target is null)
+            return NotFound(new { message = "Người này không ở trong nhóm." });
+        if (target.Role == MemberRole.Admin)
+            return Deny("Không thể xoá quản trị viên.");
+
+        var affected = conv.Members.Select(m => m.UserId).ToList();
+
+        _db.ConversationMembers.Remove(target);
+        await _db.SaveChangesAsync();
+        await NotifyAsync(affected);
+
+        return NoContent();
+    }
+
+    [HttpPost("{id:int}/leave")]
+    public async Task<ActionResult> Leave(int id)
+    {
+        var me = User.GetUserId();
+        var conv = await LoadForMemberAsync(id, me);
+        if (conv is null) return Forbid();
+
+        if (conv.Type != ConversationType.Group)
+            return BadRequest(new { message = "Chỉ rời được cuộc trò chuyện nhóm." });
+
+        var mine = conv.Members.First(m => m.UserId == me);
+        var affected = conv.Members.Select(m => m.UserId).ToList();
+        var remaining = conv.Members.Where(m => m.UserId != me).ToList();
+
+        if (remaining.Count == 0)
+        {
+            // không còn ai: xoá nhóm (kèm toàn bộ tin nhắn)
+            _db.Conversations.Remove(conv);
+        }
+        else
+        {
+            _db.ConversationMembers.Remove(mine);
+
+            // quản trị viên rời đi mà không còn quản trị viên nào: người vào sớm nhất lên thay
+            if (mine.Role == MemberRole.Admin && remaining.All(m => m.Role != MemberRole.Admin))
+                remaining.OrderBy(m => m.JoinedAt).First().Role = MemberRole.Admin;
+        }
+
+        await _db.SaveChangesAsync();
+        await NotifyAsync(affected);
+
+        return NoContent();
+    }
+
+    [HttpPut("{id:int}")]
+    public async Task<ActionResult> Rename(int id, RenameRequest req)
+    {
+        var me = User.GetUserId();
+        var conv = await LoadForMemberAsync(id, me);
+        if (conv is null) return Forbid();
+
+        if (conv.Type != ConversationType.Group)
+            return BadRequest(new { message = "Chỉ đổi tên được cuộc trò chuyện nhóm." });
+        if (!IsAdmin(conv, me))
+            return Deny("Chỉ quản trị viên mới được đổi tên nhóm.");
+
+        var name = req.Name.Trim();
+        if (name.Length == 0)
+            return BadRequest(new { message = "Tên nhóm không được để trống." });
+
+        conv.Name = name;
+        await _db.SaveChangesAsync();
+        await NotifyAsync(conv.Members.Select(m => m.UserId));
+
+        return NoContent();
+    }
+
+    // ---------- Hàm dùng chung ----------
+
+    private static List<string> NormalizeUsernames(IEnumerable<string>? raw) =>
+        (raw ?? Enumerable.Empty<string>())
+            .Select(u => u.Trim().ToLowerInvariant())
+            .Where(u => u.Length > 0)
+            .Distinct()
+            .ToList();
+
+    private Task<bool> IsMemberAsync(int conversationId, int userId) =>
+        _db.ConversationMembers.AnyAsync(m => m.ConversationId == conversationId && m.UserId == userId);
+
+    // Trả null nếu cuộc trò chuyện không tồn tại hoặc người gọi không thuộc về nó
+    private async Task<Conversation?> LoadForMemberAsync(int id, int me)
+    {
+        var conv = await _db.Conversations
+            .Include(c => c.Members)
+            .FirstOrDefaultAsync(c => c.Id == id);
+
+        return conv is not null && conv.Members.Any(m => m.UserId == me) ? conv : null;
+    }
+
+    private static bool IsAdmin(Conversation conv, int userId) =>
+        conv.Members.Any(m => m.UserId == userId && m.Role == MemberRole.Admin);
+
+    private Task NotifyAsync(IEnumerable<int> userIds)
+    {
+        var groups = userIds.Distinct().Select(ChatHub.UserGroup).ToList();
+        return _hub.Clients.Groups(groups).SendAsync("ConversationsChanged");
+    }
+
+    private ObjectResult Deny(string message) =>
+        StatusCode(StatusCodes.Status403Forbidden, new { message });
 }

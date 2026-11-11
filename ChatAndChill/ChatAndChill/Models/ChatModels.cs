@@ -5,6 +5,11 @@ public enum ConversationType
     Direct = 0,
     Group = 1
 }
+public enum MemberRole
+{
+    Member = 0,
+    Admin = 1
+}
 
 public class Conversation
 {
@@ -26,6 +31,7 @@ public class ConversationMember
     public User User { get; set; } = null!;
 
     public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
+    public MemberRole Role { get; set; } = MemberRole.Member;
 }
 
 public class Message

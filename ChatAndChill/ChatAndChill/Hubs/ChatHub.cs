@@ -18,7 +18,7 @@ public class ChatHub : Hub
         _db = db;
     }
 
-    private static string UserGroup(int userId) => $"user-{userId}";
+    public static string UserGroup(int userId) => $"user-{userId}";
 
     public override async Task OnConnectedAsync()
     {

@@ -2,18 +2,19 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { API_URL } from './config';
-import { ConversationDto, MessageDto } from './models';
+import { ConversationDto, MemberDto, MessageDto } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ChatApiService {
   private http = inject(HttpClient);
+  private base = `${API_URL}/api/conversations`;
 
   conversations(): Observable<ConversationDto[]> {
-    return this.http.get<ConversationDto[]>(`${API_URL}/api/conversations`);
+    return this.http.get<ConversationDto[]>(this.base);
   }
 
   startDirect(username: string): Observable<ConversationDto> {
-    return this.http.post<ConversationDto>(`${API_URL}/api/conversations/direct`, { username });
+    return this.http.post<ConversationDto>(`${this.base}/direct`, { username });
   }
 
   messages(conversationId: number, before?: number, limit = 30): Observable<MessageDto[]> {
@@ -21,9 +22,30 @@ export class ChatApiService {
     if (before !== undefined) {
       params = params.set('before', before);
     }
-    return this.http.get<MessageDto[]>(
-      `${API_URL}/api/conversations/${conversationId}/messages`,
-      { params }
-    );
+    return this.http.get<MessageDto[]>(`${this.base}/${conversationId}/messages`, { params });
+  }
+
+  createGroup(name: string, usernames: string[]): Observable<ConversationDto> {
+    return this.http.post<ConversationDto>(`${this.base}/group`, { name, usernames });
+  }
+
+  members(conversationId: number): Observable<MemberDto[]> {
+    return this.http.get<MemberDto[]>(`${this.base}/${conversationId}/members`);
+  }
+
+  addMembers(conversationId: number, usernames: string[]): Observable<void> {
+    return this.http.post<void>(`${this.base}/${conversationId}/members`, { usernames });
+  }
+
+  removeMember(conversationId: number, userId: number): Observable<void> {
+    return this.http.delete<void>(`${this.base}/${conversationId}/members/${userId}`);
+  }
+
+  leave(conversationId: number): Observable<void> {
+    return this.http.post<void>(`${this.base}/${conversationId}/leave`, {});
+  }
+
+  rename(conversationId: number, name: string): Observable<void> {
+    return this.http.put<void>(`${this.base}/${conversationId}`, { name });
   }
 }

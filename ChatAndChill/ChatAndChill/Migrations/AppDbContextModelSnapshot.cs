@@ -55,6 +55,9 @@ namespace ChatAndChill.Migrations
                     b.Property<DateTime>("JoinedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("Role")
+                        .HasColumnType("integer");
+
                     b.HasKey("ConversationId", "UserId");
 
                     b.HasIndex("UserId");

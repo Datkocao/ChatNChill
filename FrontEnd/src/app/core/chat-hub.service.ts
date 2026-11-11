@@ -12,6 +12,7 @@ export class ChatHubService {
   private auth = inject(AuthService);
   private connection: signalR.HubConnection | null = null;
 
+  readonly conversationsChanged$ = new Subject<void>();
   readonly state = signal<HubState>('disconnected');
   readonly messages$ = new Subject<MessageDto>();
   readonly reconnected$ = new Subject<void>();
@@ -27,6 +28,7 @@ export class ChatHubService {
       .build();
 
     conn.on('ReceiveMessage', (m: MessageDto) => this.messages$.next(m));
+    conn.on('ConversationsChanged', () => this.conversationsChanged$.next());
     conn.onreconnecting(() => this.state.set('reconnecting'));
     conn.onreconnected(() => {
       this.state.set('connected');
