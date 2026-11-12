@@ -434,7 +434,7 @@ public class ConversationsController : ControllerBase
     }
 
     [HttpPost("{id:int}/leave")]
-    public async Task<ActionResult> Leave(int id)
+    public async Task<ActionResult> Leave(int id, [FromServices] IWebHostEnvironment env)
     {
         var me = User.GetUserId();
         var conv = await LoadForMemberAsync(id, me);
@@ -446,10 +446,15 @@ public class ConversationsController : ControllerBase
         var mine = conv.Members.First(m => m.UserId == me);
         var affected = conv.Members.Select(m => m.UserId).ToList();
         var remaining = conv.Members.Where(m => m.UserId != me).ToList();
+        var orphanFiles = new List<string>();
 
         if (remaining.Count == 0)
         {
             // không còn ai: xoá nhóm (kèm toàn bộ tin nhắn)
+            orphanFiles = await _db.Messages
+           .Where(m => m.ConversationId == id && m.AttachmentPath != null)
+           .Select(m => m.AttachmentPath!)
+           .ToListAsync();
             _db.Conversations.Remove(conv);
         }
         else
@@ -462,6 +467,7 @@ public class ConversationsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        DeleteUploads(env, orphanFiles);
         await NotifyAsync(affected);
 
         return NoContent();
@@ -524,6 +530,25 @@ public class ConversationsController : ControllerBase
     private ObjectResult Deny(string message) =>
         StatusCode(StatusCodes.Status403Forbidden, new { message });
 
+        // Xoá file đính kèm trên đĩa; lỗi xoá file không được làm hỏng thao tác chính
+    private static void DeleteUploads(IWebHostEnvironment env, IEnumerable<string> names)
+    {
+        var folder = Path.Combine(env.ContentRootPath, "uploads");
+        foreach (var name in names)
+        {
+            try
+            {
+                // chỉ lấy tên file, chặn mọi ký tự đường dẫn
+                var path = Path.Combine(folder, Path.GetFileName(name));
+                if (System.IO.File.Exists(path))
+                    System.IO.File.Delete(path);
+            }
+            catch
+            {
+                // bỏ qua
+            }
+        }
+    }
     // Trả về username của những người KHÔNG phải bạn bè của "me"
     private async Task<List<string>> NonFriendsAsync(int me, IEnumerable<User> users)
     {

@@ -83,7 +83,7 @@ public class FriendsController : ControllerBase
             return Ok(new List<UserSearchDto>());
 
         var users = await _db.Users
-            .Where(u => u.Id != me && u.Username.Contains(q))
+            .Where(u => u.Id != me   && (u.Username.Contains(q) || (u.DisplayName != null && u.DisplayName.ToLower().Contains(q))))
             .OrderBy(u => u.Username)
             .Take(10)
             .Select(u => new { u.Id, u.Username, DisplayName = u.DisplayName ?? u.Username })

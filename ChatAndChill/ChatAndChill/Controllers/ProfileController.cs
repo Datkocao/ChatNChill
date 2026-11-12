@@ -1,9 +1,11 @@
 ﻿using ChatAndChill.Data;
 using ChatAndChill.Dtos;
 using ChatAndChill.Extensions;
+using ChatAndChill.Hubs;
 using ChatAndChill.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace ChatAndChill.Controllers;
@@ -23,12 +25,15 @@ public class ProfileController : ControllerBase
 
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
+    private readonly IHubContext<ChatHub> _hub;
 
-    public ProfileController(AppDbContext db, IWebHostEnvironment env)
+    public ProfileController(AppDbContext db, IWebHostEnvironment env, IHubContext<ChatHub> hub)
     {
         _db = db;
         _env = env;
+        _hub = hub;
     }
+
 
     // Hồ sơ của chính mình
     [HttpGet("me")]
@@ -69,6 +74,7 @@ public class ProfileController : ControllerBase
         user.DisplayName = displayName;
         user.Bio = bio.Length == 0 ? null : bio;
         await _db.SaveChangesAsync();
+        await NotifyProfileChangedAsync(user);
 
         return Ok(ToDto(user));
     }
@@ -116,8 +122,38 @@ public class ProfileController : ControllerBase
 
         await _db.SaveChangesAsync();
         DeleteOldFile(folder, oldUrl); // dọn ảnh cũ để không đầy ổ đĩa
+        await _db.SaveChangesAsync();
+        DeleteOldFile(folder, oldUrl); // dọn ảnh cũ để không đầy ổ đĩa
+        if (isAvatar) await NotifyProfileChangedAsync(user);   // THÊM dòng này
 
         return Ok(ToDto(user));
+    }
+
+
+    // Báo cho bạn bè, người chung cuộc trò chuyện (và các tab khác của mình) biết hồ sơ vừa đổi
+    private async Task NotifyProfileChangedAsync(User user)
+    {
+        var chatMates = await _db.ConversationMembers
+            .Where(m => m.UserId != user.Id
+                && _db.ConversationMembers.Any(x => x.ConversationId == m.ConversationId && x.UserId == user.Id))
+            .Select(m => m.UserId)
+            .ToListAsync();
+
+        var friends = await _db.Friendships
+            .Where(f => f.Status == FriendshipStatus.Accepted
+                        && (f.RequesterId == user.Id || f.AddresseeId == user.Id))
+            .Select(f => f.RequesterId == user.Id ? f.AddresseeId : f.RequesterId)
+            .ToListAsync();
+
+        var groups = chatMates.Union(friends).Append(user.Id).Distinct()
+            .Select(ChatHub.UserGroup).ToList();
+
+        await _hub.Clients.Groups(groups).SendAsync("ProfileChanged", new
+        {
+            userId = user.Id,
+            displayName = user.DisplayName ?? user.Username,
+            avatarUrl = user.AvatarUrl
+        });
     }
 
     private static void DeleteOldFile(string folder, string? oldUrl)
