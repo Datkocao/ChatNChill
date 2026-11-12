@@ -33,6 +33,7 @@ public class ConversationDto
     public int? OtherUserId { get; set; } // chỉ có giá trị với chat 1-1
     public string? OtherAvatarUrl { get; set; } // avatar người kia trong chat 1-1
     public MessageDto? LastMessage { get; set; }
+}
 
     public class MemberDto
     {
@@ -61,4 +62,3 @@ public class ConversationDto
 
         public List<string> Usernames { get; set; } = new();
     }
-}

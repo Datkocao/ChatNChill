@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-using static ChatAndChill.Dtos.ConversationDto;
+
 
 namespace ChatAndChill.Controllers;
 
@@ -81,13 +81,6 @@ public class ConversationsController : ControllerBase
             await _db.SaveChangesAsync();
         }
 
-        return Ok(new ConversationDto
-        {
-            Id = conv.Id,
-            Type = "direct",
-            Name = other.DisplayName ?? other.Username,
-            MemberCount = 2
-        });
         return Ok(new ConversationDto
         {
             Id = conv.Id,
