@@ -14,6 +14,7 @@ public class MessageDto
     public int ConversationId { get; set; }
     public int SenderId { get; set; }
     public string SenderName { get; set; } = "";
+    public string? SenderAvatarUrl { get; set; }
     public string Content { get; set; } = "";
     public DateTime CreatedAt { get; set; }
     public string? AttachmentUrl { get; set; }         // dạng /uploads/xxxx.png
@@ -30,6 +31,7 @@ public class ConversationDto
     public int MemberCount { get; set; }
     public bool IsAdmin { get; set; }
     public int? OtherUserId { get; set; } // chỉ có giá trị với chat 1-1
+    public string? OtherAvatarUrl { get; set; } // avatar người kia trong chat 1-1
     public MessageDto? LastMessage { get; set; }
 
     public class MemberDto
@@ -37,6 +39,7 @@ public class ConversationDto
         public int UserId { get; set; }
         public string Username { get; set; } = "";
         public string DisplayName { get; set; } = "";
+        public string? AvatarUrl { get; set; }
         public bool IsAdmin { get; set; }
     }
 

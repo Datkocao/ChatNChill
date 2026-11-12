@@ -6,6 +6,7 @@ using ChatAndChill.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using System.Reflection;
 
 namespace ChatAndChill.Hubs;
 
@@ -104,9 +105,9 @@ public class ChatHub : Hub
         if (!memberIds.Contains(me))
             throw new HubException("Bạn không thuộc cuộc trò chuyện này.");
 
-        var senderName = await _db.Users
+        var sender = await _db.Users
             .Where(u => u.Id == me)
-            .Select(u => u.DisplayName ?? u.Username)
+            .Select(u => new { Name = u.DisplayName ?? u.Username, u.AvatarUrl })
             .FirstAsync();
 
         var message = new Message
@@ -123,7 +124,8 @@ public class ChatHub : Hub
             Id = message.Id,
             ConversationId = conversationId,
             SenderId = me,
-            SenderName = senderName,
+            SenderName = sender.Name,
+            SenderAvatarUrl = sender.AvatarUrl,
             Content = message.Content,
             CreatedAt = message.CreatedAt
         };
@@ -144,10 +146,10 @@ public class ChatHub : Hub
         if (!memberIds.Contains(me))
             return;
 
-        var name = await _db.Users
-            .Where(u => u.Id == me)
-            .Select(u => u.DisplayName ?? u.Username)
-            .FirstAsync();
+        var sender = await _db.Users
+      .Where(u => u.Id == me)
+      .Select(u => new { Name = u.DisplayName ?? u.Username, u.AvatarUrl })
+      .FirstAsync();
 
         // Gửi cho mọi thành viên trừ chính người đang gõ
         var groups = memberIds
@@ -156,7 +158,7 @@ public class ChatHub : Hub
             .ToList();
 
         await Clients.Groups(groups)
-            .SendAsync("UserTyping", new { conversationId, userId = me, name });
+            .SendAsync("UserTyping", new { conversationId, userId = me, name = sender.Name });
     }
 
     // Client gọi khi đã xem tới tin messageId trong cuộc trò chuyện

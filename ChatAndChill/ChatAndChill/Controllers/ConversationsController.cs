@@ -94,7 +94,8 @@ public class ConversationsController : ControllerBase
             Type = "direct",
             Name = other.DisplayName ?? other.Username,
             MemberCount = 2,
-            OtherUserId = other.Id // MỚI (nhớ thêm dấu phẩy sau MemberCount = 2)
+            OtherUserId = other.Id,
+            OtherAvatarUrl = other.AvatarUrl
         });
     }
 
@@ -122,6 +123,10 @@ public class ConversationsController : ControllerBase
                     .Where(m => m.UserId != me)
                     .Select(m => (int?)m.UserId)
                     .FirstOrDefault(),
+                OtherAvatarUrl = c.Members
+                    .Where(m => m.UserId != me)
+                    .Select(m => m.User.AvatarUrl)
+                    .FirstOrDefault(),
                 Last = c.Messages
                     .OrderByDescending(x => x.Id)
                     .Select(x => new MessageDto
@@ -130,6 +135,7 @@ public class ConversationsController : ControllerBase
                         ConversationId = x.ConversationId,
                         SenderId = x.SenderId,
                         SenderName = x.Sender.DisplayName ?? x.Sender.Username,
+                        SenderAvatarUrl = x.Sender.AvatarUrl,
                         Content = x.Content,
                         CreatedAt = x.CreatedAt,
                         AttachmentUrl = x.AttachmentPath == null ? null : "/uploads/" + x.AttachmentPath,
@@ -153,6 +159,7 @@ public class ConversationsController : ControllerBase
                 MemberCount = r.MemberCount,
                 IsAdmin = r.IsAdmin,
                 OtherUserId = r.Type == ConversationType.Direct ? r.OtherUserId : null,
+                OtherAvatarUrl = r.Type == ConversationType.Direct ? r.OtherAvatarUrl : null,
                 LastMessage = r.Last
             })
             .ToList();
@@ -182,6 +189,7 @@ public class ConversationsController : ControllerBase
                 ConversationId = m.ConversationId,
                 SenderId = m.SenderId,
                 SenderName = m.Sender.DisplayName ?? m.Sender.Username,
+                SenderAvatarUrl = m.Sender.AvatarUrl,
                 Content = m.Content,
                 CreatedAt = m.CreatedAt,
                 AttachmentUrl = m.AttachmentPath == null ? null : "/uploads/" + m.AttachmentPath,
@@ -259,17 +267,18 @@ public class ConversationsController : ControllerBase
         _db.Messages.Add(message);
         await _db.SaveChangesAsync();
 
-        var senderName = await _db.Users
-            .Where(u => u.Id == me)
-            .Select(u => u.DisplayName ?? u.Username)
-            .FirstAsync();
+        var sender = await _db.Users
+           .Where(u => u.Id == me)
+           .Select(u => new { Name = u.DisplayName ?? u.Username, u.AvatarUrl })
+           .FirstAsync();
 
         var dto = new MessageDto
         {
             Id = message.Id,
             ConversationId = id,
             SenderId = me,
-            SenderName = senderName,
+            SenderName = sender.Name,
+            SenderAvatarUrl = sender.AvatarUrl,
             Content = message.Content,
             CreatedAt = message.CreatedAt,
             AttachmentUrl = "/uploads/" + stored,
@@ -354,6 +363,7 @@ public class ConversationsController : ControllerBase
                 UserId = m.UserId,
                 Username = m.User.Username,
                 DisplayName = m.User.DisplayName ?? m.User.Username,
+                AvatarUrl = m.User.AvatarUrl,
                 IsAdmin = m.Role == MemberRole.Admin
             })
             .ToListAsync();

@@ -151,6 +151,12 @@ namespace ChatAndChill.Migrations
                     b.Property<string>("AvatarUrl")
                         .HasColumnType("text");
 
+                    b.Property<string>("Bio")
+                        .HasColumnType("text");
+
+                    b.Property<string>("CoverUrl")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
