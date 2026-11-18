@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using ChatAndChill.Services;
 
 namespace ChatAndChill.Controllers;
 
@@ -24,13 +25,13 @@ public class ProfileController : ControllerBase
         new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
 
     private readonly AppDbContext _db;
-    private readonly IWebHostEnvironment _env;
+    private readonly R2StorageService _r2;
     private readonly IHubContext<ChatHub> _hub;
 
-    public ProfileController(AppDbContext db, IWebHostEnvironment env, IHubContext<ChatHub> hub)
+    public ProfileController(AppDbContext db, R2StorageService r2, IHubContext<ChatHub> hub)
     {
         _db = db;
-        _env = env;
+        _r2 = r2;
         _hub = hub;
     }
 
@@ -89,10 +90,38 @@ public class ProfileController : ControllerBase
     public Task<ActionResult<ProfileDto>> UploadCover(IFormFile file) =>
         SaveImageAsync(file, "covers", MaxCoverBytes, isAvatar: false);
 
+
+    // Ảnh hồ sơ cho thẻ <img>: thẻ này không gửi được token nên endpoint phải mở công khai
+    [AllowAnonymous]
+    [HttpGet("{userId:int}/avatar")]
+    public Task<IActionResult> GetAvatar(int userId) => ServeImageAsync(userId, isAvatar: true);
+
+    [AllowAnonymous]
+    [HttpGet("{userId:int}/cover")]
+    public Task<IActionResult> GetCover(int userId) => ServeImageAsync(userId, isAvatar: false);
+
     // ---------- Hàm dùng chung ----------
 
+    private async Task<IActionResult> ServeImageAsync(int userId, bool isAvatar)
+    {
+        var keys = await _db.Users
+            .Where(u => u.Id == userId)
+            .Select(u => new { u.AvatarKey, u.CoverKey })
+            .FirstOrDefaultAsync();
+
+        var key = isAvatar ? keys?.AvatarKey : keys?.CoverKey;
+        if (string.IsNullOrEmpty(key)) return NotFound();
+
+        var file = await _r2.DownloadAsync(key);
+        if (file is null) return NotFound();
+
+        // đường dẫn có ?v=tên-file nên mỗi lần đổi ảnh là một URL mới, cache lâu được
+        Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        return File(file.Value.Stream, file.Value.ContentType);
+    }
     private async Task<ActionResult<ProfileDto>> SaveImageAsync(
-        IFormFile? file, string folderName, long maxBytes, bool isAvatar)
+     IFormFile? file, string folderName, long maxBytes, bool isAvatar)
     {
         var user = await _db.Users.FindAsync(User.GetUserId());
         if (user is null) return NotFound();
@@ -103,30 +132,68 @@ public class ProfileController : ControllerBase
             return BadRequest(new { message = $"Ảnh quá lớn (tối đa {maxBytes / 1024 / 1024} MB)." });
 
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (!ImageExts.Contains(ext))
+        if (!ImageExts.Contains(ext) || !await LooksLikeImageAsync(file))
             return BadRequest(new { message = "Chỉ nhận ảnh jpg, png, gif, webp." });
 
-        // lưu với tên ngẫu nhiên, không dùng tên gốc
-        var folder = Path.Combine(_env.ContentRootPath, "uploads", folderName);
-        Directory.CreateDirectory(folder);
-        var stored = $"{Guid.NewGuid():N}{ext}";
-        await using (var stream = System.IO.File.Create(Path.Combine(folder, stored)))
+        // tên ngẫu nhiên, không dùng tên gốc
+        var newKey = $"{folderName}/{Guid.NewGuid():N}{ext}";
+        await using (var stream = file.OpenReadStream())
         {
-            await file.CopyToAsync(stream);
+            await _r2.UploadAsync(newKey, stream, ContentTypeFor(ext));
         }
 
-        var oldUrl = isAvatar ? user.AvatarUrl : user.CoverUrl;
-        var newUrl = $"/uploads/{folderName}/{stored}";
-        if (isAvatar) user.AvatarUrl = newUrl;
-        else user.CoverUrl = newUrl;
+        var oldKey = isAvatar ? user.AvatarKey : user.CoverKey;
+        if (isAvatar)
+        {
+            user.AvatarKey = newKey;
+            user.AvatarUrl = ProfileUrls.Avatar(user.Id, newKey);
+        }
+        else
+        {
+            user.CoverKey = newKey;
+            user.CoverUrl = ProfileUrls.Cover(user.Id, newKey);
+        }
 
-        await _db.SaveChangesAsync();
-        DeleteOldFile(folder, oldUrl); // dọn ảnh cũ để không đầy ổ đĩa
-        await _db.SaveChangesAsync();
-        DeleteOldFile(folder, oldUrl); // dọn ảnh cũ để không đầy ổ đĩa
-        if (isAvatar) await NotifyProfileChangedAsync(user);   // THÊM dòng này
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch
+        {
+            await _r2.DeleteAsync(new[] { newKey }); // không để ảnh mồ côi trên R2
+            throw;
+        }
 
+        if (!string.IsNullOrEmpty(oldKey))
+            await _r2.DeleteAsync(new[] { oldKey }); // dọn ảnh cũ
+
+        if (isAvatar) await NotifyProfileChangedAsync(user);
         return Ok(ToDto(user));
+    }
+
+    private static string ContentTypeFor(string ext) => ext switch
+    {
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".png" => "image/png",
+        ".gif" => "image/gif",
+        ".webp" => "image/webp",
+        _ => "application/octet-stream"
+    };
+
+    // Kiểm tra vài byte đầu file có đúng là ảnh không, tránh đổi đuôi file khác thành .jpg
+    private static async Task<bool> LooksLikeImageAsync(IFormFile file)
+    {
+        var h = new byte[12];
+        await using var s = file.OpenReadStream();
+        var n = await s.ReadAsync(h, 0, h.Length);
+        if (n < 12) return false;
+
+        var jpg = h[0] == 0xFF && h[1] == 0xD8 && h[2] == 0xFF;
+        var png = h[0] == 0x89 && h[1] == 0x50 && h[2] == 0x4E && h[3] == 0x47;
+        var gif = h[0] == 0x47 && h[1] == 0x49 && h[2] == 0x46 && h[3] == 0x38;
+        var webp = h[0] == 0x52 && h[1] == 0x49 && h[2] == 0x46 && h[3] == 0x46
+                && h[8] == 0x57 && h[9] == 0x45 && h[10] == 0x42 && h[11] == 0x50;
+        return jpg || png || gif || webp;
     }
 
 
@@ -154,21 +221,6 @@ public class ProfileController : ControllerBase
             displayName = user.DisplayName ?? user.Username,
             avatarUrl = user.AvatarUrl
         });
-    }
-
-    private static void DeleteOldFile(string folder, string? oldUrl)
-    {
-        if (string.IsNullOrEmpty(oldUrl)) return;
-        try
-        {
-            // chỉ lấy phần tên file để không thoát ra khỏi thư mục
-            var path = Path.Combine(folder, Path.GetFileName(oldUrl));
-            if (System.IO.File.Exists(path)) System.IO.File.Delete(path);
-        }
-        catch
-        {
-            // xoá không được cũng không sao
-        }
     }
 
     private static ProfileDto ToDto(User u) => new()

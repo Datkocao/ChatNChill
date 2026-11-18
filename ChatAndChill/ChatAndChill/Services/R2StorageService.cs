@@ -2,6 +2,7 @@
 using Amazon.S3;
 using Amazon.S3.Model;
 using Microsoft.Extensions.Options;
+using System.Net;
 
 namespace ChatAndChill.Services;
 
@@ -48,6 +49,20 @@ public class R2StorageService
             ContentType = contentType,
             DisablePayloadSigning = true
         }, ct);
+    }
+
+    // Tải file về để server trả cho trình duyệt; không có file thì trả null
+    public async Task<(Stream Stream, string ContentType)?> DownloadAsync(string key, CancellationToken ct = default)
+    {
+        try
+        {
+            var res = await _s3.GetObjectAsync(_bucket, key, ct);
+            return (res.ResponseStream, res.Headers.ContentType);
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
     }
 
     // Xoá file; lỗi xoá không làm hỏng thao tác chính

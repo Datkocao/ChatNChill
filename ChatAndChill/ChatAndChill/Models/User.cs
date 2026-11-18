@@ -10,5 +10,7 @@
         public string? CoverUrl { get; set; }   
         public string? Bio { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public string? AvatarKey { get; set; }
+        public string? CoverKey { get; set; }
     }
 }

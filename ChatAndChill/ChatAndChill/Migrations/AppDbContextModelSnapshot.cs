@@ -148,10 +148,16 @@ namespace ChatAndChill.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AvatarKey")
+                        .HasColumnType("text");
+
                     b.Property<string>("AvatarUrl")
                         .HasColumnType("text");
 
                     b.Property<string>("Bio")
+                        .HasColumnType("text");
+
+                    b.Property<string>("CoverKey")
                         .HasColumnType("text");
 
                     b.Property<string>("CoverUrl")

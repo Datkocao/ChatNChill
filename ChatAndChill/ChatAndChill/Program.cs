@@ -135,13 +135,6 @@ namespace ChatAndChill
             app.MapControllers();
             app.MapHub<ChatHub>("/hubs/chat");
 
-            // TẠM THỜI: kiểm tra kết nối R2, xoá sau khi thử xong
-            app.MapGet("/api/r2-ping", async (R2StorageService r2) =>
-            {
-                try { return Results.Ok(new { ok = await r2.PingAsync() }); }
-                catch (Exception ex) { return Results.Problem(ex.Message); }
-            }).RequireAuthorization();
-
             app.Run();
         }
     }
