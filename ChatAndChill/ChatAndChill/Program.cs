@@ -50,6 +50,8 @@ namespace ChatAndChill
                 options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
             builder.Services.AddScoped<TokenService>();
+            builder.Services.Configure<R2Options>(builder.Configuration.GetSection("R2"));
+            builder.Services.AddSingleton<R2StorageService>();
 
             builder.Services.AddCors(options =>
             {
@@ -132,6 +134,13 @@ namespace ChatAndChill
 
             app.MapControllers();
             app.MapHub<ChatHub>("/hubs/chat");
+
+            // TẠM THỜI: kiểm tra kết nối R2, xoá sau khi thử xong
+            app.MapGet("/api/r2-ping", async (R2StorageService r2) =>
+            {
+                try { return Results.Ok(new { ok = await r2.PingAsync() }); }
+                catch (Exception ex) { return Results.Problem(ex.Message); }
+            }).RequireAuthorization();
 
             app.Run();
         }

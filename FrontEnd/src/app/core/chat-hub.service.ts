@@ -9,6 +9,7 @@ export type HubState = 'disconnected' | 'connecting' | 'connected' | 'reconnecti
 export interface TypingEvent { conversationId: number; userId: number; name: string; }
 export interface PresenceEvent { userId: number; online: boolean; }
 export interface ReadEvent { conversationId: number; userId: number; messageId: number; }
+export interface ProfileEvent { userId: number; displayName: string; avatarUrl: string | null; }
 
 @Injectable({ providedIn: 'root' })
 export class ChatHubService {
@@ -23,6 +24,7 @@ export class ChatHubService {
     readonly presence$ = new Subject<PresenceEvent>();
     readonly friendsChanged$ = new Subject<void>();
     readonly reads$ = new Subject<ReadEvent>();
+    readonly profileChanged$ = new Subject<ProfileEvent>();
 
     async start(): Promise<void> {
         if (this.connection) return;
@@ -41,6 +43,7 @@ export class ChatHubService {
         conn.on('UserOnline', (userId: number) => this.presence$.next({ userId, online: true }));
         conn.on('UserOffline', (userId: number) => this.presence$.next({ userId, online: false }));
         conn.on('MessagesRead', (e: ReadEvent) => this.reads$.next(e));
+        conn.on('ProfileChanged', (e: ProfileEvent) => this.profileChanged$.next(e));
         conn.onreconnecting(() => this.state.set('reconnecting'));
         conn.onreconnected(() => {
             this.state.set('connected');

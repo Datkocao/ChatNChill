@@ -3,11 +3,11 @@ using ChatAndChill.Dtos;
 using ChatAndChill.Extensions;
 using ChatAndChill.Hubs;
 using ChatAndChill.Models;
+using ChatAndChill.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-
 
 namespace ChatAndChill.Controllers;
 
@@ -41,13 +41,30 @@ public class ConversationsController : ControllerBase
             [".mp3"] = "audio/mpeg",
         };
 
+    private static readonly TimeSpan AttachmentLinkLifetime = TimeSpan.FromHours(6);
+
     private readonly AppDbContext _db;
     private readonly IHubContext<ChatHub> _hub;
+    private readonly R2StorageService _r2;
 
-    public ConversationsController(AppDbContext db, IHubContext<ChatHub> hub)
+    public ConversationsController(AppDbContext db, IHubContext<ChatHub> hub, R2StorageService r2)
     {
         _db = db;
         _hub = hub;
+        _r2 = r2;
+    }
+
+    // AttachmentUrl đang chứa key trên R2; đổi thành link tải có hạn
+    private MessageDto? Sign(MessageDto? m)
+    {
+        if (m?.AttachmentUrl is null) return m;
+
+        var isImage = (m.AttachmentContentType ?? "")
+            .StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+
+        m.AttachmentUrl = _r2.GetDownloadUrl(
+            m.AttachmentUrl, m.AttachmentName, inline: isImage, lifetime: AttachmentLinkLifetime);
+        return m;
     }
 
     // ---------- Chat 1-1 ----------
@@ -131,7 +148,7 @@ public class ConversationsController : ControllerBase
                         SenderAvatarUrl = x.Sender.AvatarUrl,
                         Content = x.Content,
                         CreatedAt = x.CreatedAt,
-                        AttachmentUrl = x.AttachmentPath == null ? null : "/uploads/" + x.AttachmentPath,
+                        AttachmentUrl = x.AttachmentPath,
                         AttachmentName = x.AttachmentName,
                         AttachmentContentType = x.AttachmentContentType,
                         AttachmentSize = x.AttachmentSize
@@ -153,7 +170,7 @@ public class ConversationsController : ControllerBase
                 IsAdmin = r.IsAdmin,
                 OtherUserId = r.Type == ConversationType.Direct ? r.OtherUserId : null,
                 OtherAvatarUrl = r.Type == ConversationType.Direct ? r.OtherAvatarUrl : null,
-                LastMessage = r.Last
+                LastMessage = Sign(r.Last)
             })
             .ToList();
 
@@ -185,7 +202,7 @@ public class ConversationsController : ControllerBase
                 SenderAvatarUrl = m.Sender.AvatarUrl,
                 Content = m.Content,
                 CreatedAt = m.CreatedAt,
-                AttachmentUrl = m.AttachmentPath == null ? null : "/uploads/" + m.AttachmentPath,
+                AttachmentUrl = m.AttachmentPath,
                 AttachmentName = m.AttachmentName,
                 AttachmentContentType = m.AttachmentContentType,
                 AttachmentSize = m.AttachmentSize
@@ -193,9 +210,9 @@ public class ConversationsController : ControllerBase
             .ToListAsync();
 
         items.Reverse();
+        items.ForEach(x => Sign(x));
         return Ok(items);
     }
-
 
     // Ai đã đọc tới tin nào (dùng khi mở cuộc trò chuyện)
     [HttpGet("{id:int}/reads")]
@@ -212,12 +229,11 @@ public class ConversationsController : ControllerBase
         return Ok(reads);
     }
 
-
-    // Gửi tin có file đính kèm
+    // Gửi tin có file đính kèm (file lưu trên Cloudflare R2)
     [HttpPost("{id:int}/attachments")]
     [RequestSizeLimit(MaxUploadBytes + 1024 * 1024)]
     public async Task<ActionResult<MessageDto>> Upload(
-        int id, IFormFile file, [FromForm] string? content, [FromServices] IWebHostEnvironment env)
+        int id, IFormFile file, [FromForm] string? content)
     {
         var me = User.GetUserId();
         if (!await IsMemberAsync(id, me)) return Forbid();
@@ -235,13 +251,11 @@ public class ConversationsController : ControllerBase
         if (content.Length > 4000)
             return BadRequest(new { message = "Tin nhắn quá dài (tối đa 4000 ký tự)." });
 
-        // lưu file với tên ngẫu nhiên, không dùng tên gốc
-        var folder = Path.Combine(env.ContentRootPath, "uploads");
-        Directory.CreateDirectory(folder);
-        var stored = $"{Guid.NewGuid():N}{ext}";
-        await using (var stream = System.IO.File.Create(Path.Combine(folder, stored)))
+        // tải lên R2 với tên ngẫu nhiên, không dùng tên gốc
+        var key = $"attachments/{id}/{Guid.NewGuid():N}{ext}";
+        await using (var stream = file.OpenReadStream())
         {
-            await file.CopyToAsync(stream);
+            await _r2.UploadAsync(key, stream, contentType);
         }
 
         var originalName = Path.GetFileName(file.FileName);
@@ -252,18 +266,26 @@ public class ConversationsController : ControllerBase
             ConversationId = id,
             SenderId = me,
             Content = content,
-            AttachmentPath = stored,
+            AttachmentPath = key,
             AttachmentName = originalName,
             AttachmentContentType = contentType,
             AttachmentSize = file.Length
         };
         _db.Messages.Add(message);
-        await _db.SaveChangesAsync();
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch
+        {
+            await _r2.DeleteAsync(new[] { key }); // không để file mồ côi trên R2
+            throw;
+        }
 
         var sender = await _db.Users
-           .Where(u => u.Id == me)
-           .Select(u => new { Name = u.DisplayName ?? u.Username, u.AvatarUrl })
-           .FirstAsync();
+            .Where(u => u.Id == me)
+            .Select(u => new { Name = u.DisplayName ?? u.Username, u.AvatarUrl })
+            .FirstAsync();
 
         var dto = new MessageDto
         {
@@ -274,11 +296,12 @@ public class ConversationsController : ControllerBase
             SenderAvatarUrl = sender.AvatarUrl,
             Content = message.Content,
             CreatedAt = message.CreatedAt,
-            AttachmentUrl = "/uploads/" + stored,
+            AttachmentUrl = key,
             AttachmentName = originalName,
             AttachmentContentType = contentType,
             AttachmentSize = file.Length
         };
+        Sign(dto); // đổi key thành link tải có hạn
 
         var memberIds = await _db.ConversationMembers
             .Where(m => m.ConversationId == id)
@@ -290,6 +313,7 @@ public class ConversationsController : ControllerBase
 
         return Ok(dto);
     }
+
     // ---------- Nhóm ----------
 
     [HttpPost("group")]
@@ -434,7 +458,7 @@ public class ConversationsController : ControllerBase
     }
 
     [HttpPost("{id:int}/leave")]
-    public async Task<ActionResult> Leave(int id, [FromServices] IWebHostEnvironment env)
+    public async Task<ActionResult> Leave(int id)
     {
         var me = User.GetUserId();
         var conv = await LoadForMemberAsync(id, me);
@@ -452,9 +476,9 @@ public class ConversationsController : ControllerBase
         {
             // không còn ai: xoá nhóm (kèm toàn bộ tin nhắn)
             orphanFiles = await _db.Messages
-           .Where(m => m.ConversationId == id && m.AttachmentPath != null)
-           .Select(m => m.AttachmentPath!)
-           .ToListAsync();
+                .Where(m => m.ConversationId == id && m.AttachmentPath != null)
+                .Select(m => m.AttachmentPath!)
+                .ToListAsync();
             _db.Conversations.Remove(conv);
         }
         else
@@ -467,7 +491,7 @@ public class ConversationsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
-        DeleteUploads(env, orphanFiles);
+        await _r2.DeleteAsync(orphanFiles); // xoá file trên R2 sau khi database đã lưu xong
         await NotifyAsync(affected);
 
         return NoContent();
@@ -530,25 +554,6 @@ public class ConversationsController : ControllerBase
     private ObjectResult Deny(string message) =>
         StatusCode(StatusCodes.Status403Forbidden, new { message });
 
-        // Xoá file đính kèm trên đĩa; lỗi xoá file không được làm hỏng thao tác chính
-    private static void DeleteUploads(IWebHostEnvironment env, IEnumerable<string> names)
-    {
-        var folder = Path.Combine(env.ContentRootPath, "uploads");
-        foreach (var name in names)
-        {
-            try
-            {
-                // chỉ lấy tên file, chặn mọi ký tự đường dẫn
-                var path = Path.Combine(folder, Path.GetFileName(name));
-                if (System.IO.File.Exists(path))
-                    System.IO.File.Delete(path);
-            }
-            catch
-            {
-                // bỏ qua
-            }
-        }
-    }
     // Trả về username của những người KHÔNG phải bạn bè của "me"
     private async Task<List<string>> NonFriendsAsync(int me, IEnumerable<User> users)
     {

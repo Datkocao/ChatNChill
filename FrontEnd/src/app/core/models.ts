@@ -3,6 +3,7 @@ export interface MessageDto {
   conversationId: number;
   senderId: number;
   senderName: string;
+  senderAvatarUrl?: string | null;
   content: string;
   createdAt: string;
   attachmentUrl?: string | null;
@@ -18,6 +19,7 @@ export interface ConversationDto {
   memberCount: number;
   isAdmin: boolean;
   otherUserId: number | null;
+  otherAvatarUrl?: string | null;
   lastMessage: MessageDto | null;
 }
 
@@ -25,6 +27,7 @@ export interface MemberDto {
   userId: number;
   username: string;
   displayName: string;
+  avatarUrl?: string | null;
   isAdmin: boolean;
 }   
 

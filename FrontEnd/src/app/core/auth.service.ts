@@ -39,20 +39,26 @@ export class AuthService {
       .pipe(tap(res => this.save(res)));
   }
 
+  // cập nhật tên hiển thị trong phiên đăng nhập sau khi sửa hồ sơ
+  setDisplayName(displayName: string): void {
+    const current = this.session();
+    if (current) this.save({ ...current, displayName });
+  }
+
   logout(): void {
-    localStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(STORAGE_KEY);
     this.session.set(null);
     this.router.navigateByUrl('/login');
   }
 
   private save(res: AuthResponse): void {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(res));
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(res));
     this.session.set(res);
   }
 
   private load(): AuthResponse | null {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = sessionStorage.getItem(STORAGE_KEY);
       return raw ? (JSON.parse(raw) as AuthResponse) : null;
     } catch {
       return null;

@@ -138,10 +138,10 @@ const errorText = (err: HttpErrorResponse, fallback: string): string =>
             <form class="search" (ngSubmit)="search()">
               <input
                 name="q"
-                placeholder="Tên đăng nhập (ít nhất 2 ký tự)"
+                placeholder="Tên đăng nhập hoặc tên hiển thị (ít nhất 2 ký tự)"
                 autocomplete="off"
                 [ngModel]="query()"
-                (ngModelChange)="query.set($event)"
+                (ngModelChange)="query.set($event); error.set('')"
               />
               <button type="submit" class="primary sm">Tìm</button>
             </form>
@@ -246,10 +246,16 @@ export class FriendsPanel implements OnInit, OnDestroy {
     this.reload();
     this.subs.add(this.hub.friendsChanged$.subscribe(() => this.reload()));
     this.subs.add(this.hub.reconnected$.subscribe(() => this.reload()));
+    this.subs.add(this.hub.profileChanged$.subscribe(() => this.reload()));
   }
 
   ngOnDestroy(): void {
     this.subs.unsubscribe();
+  }
+
+    setTab(t: Tab): void {
+    this.tab.set(t);
+    this.error.set('');
   }
 
   // ---------- Bạn bè ----------
@@ -298,6 +304,7 @@ export class FriendsPanel implements OnInit, OnDestroy {
   // ---------- Tìm người ----------
 
   search(): void {
+        this.error.set('');
     if (this.query().trim().length < 2) {
       this.error.set('Nhập ít nhất 2 ký tự.');
       return;
