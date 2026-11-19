@@ -161,6 +161,35 @@ public class ChatHub : Hub
             .SendAsync("UserTyping", new { conversationId, userId = me, name = sender.Name });
     }
 
+    // Báo cho các thành viên khác biết mình vừa mở cuộc gọi trong cuộc trò chuyện này
+    public async Task NotifyCall(int conversationId)
+    {
+        var me = Context.User!.GetUserId();
+
+        var memberIds = await _db.ConversationMembers
+            .Where(m => m.ConversationId == conversationId)
+            .Select(m => m.UserId)
+            .ToListAsync();
+
+        if (!memberIds.Contains(me))
+            throw new HubException("Bạn không thuộc cuộc trò chuyện này.");
+
+        var callerName = await _db.Users
+            .Where(u => u.Id == me)
+            .Select(u => u.DisplayName ?? u.Username)
+            .FirstAsync();
+
+        var groups = memberIds.Where(id => id != me).Select(UserGroup).ToList();
+        if (groups.Count == 0) return;
+
+        await Clients.Groups(groups).SendAsync("IncomingCall", new
+        {
+            conversationId,
+            callerId = me,
+            callerName
+        });
+    }
+
     // Client gọi khi đã xem tới tin messageId trong cuộc trò chuyện
     public async Task MarkRead(int conversationId, long messageId)
     {
