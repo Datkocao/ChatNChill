@@ -12,6 +12,7 @@ public class AppDbContext : DbContext
     public DbSet<ConversationMember> ConversationMembers => Set<ConversationMember>();
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<Friendship> Friendships => Set<Friendship>();
+    public DbSet<Track> Tracks => Set<Track>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<User>()
@@ -31,6 +32,13 @@ public class AppDbContext : DbContext
             e.HasOne(f => f.Addressee).WithMany().HasForeignKey(f => f.AddresseeId)
                 .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(f => new { f.RequesterId, f.AddresseeId }).IsUnique();
+        });
+
+        modelBuilder.Entity<Track>(e =>
+        {
+            e.HasOne(t => t.Owner).WithMany().HasForeignKey(t => t.OwnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(t => new { t.OwnerId, t.Id });
         });
     }
 }
