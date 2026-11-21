@@ -50,7 +50,7 @@ import { ProfileApiService, ProfileDto } from '../core/profile-api.service';
   styles: [
     `
       :host { display: block; min-height: 100vh; background: #f2f4f8; }
-      .wrap { max-width: 640px; margin: 0 auto; padding: 16px; }
+      .wrap { max-width: 640px; margin: 0 auto; padding: 16px 16px calc(16px + var(--player-h, 0px)); }
       .back { display: inline-block; margin-bottom: 12px; color: #3b6df0; text-decoration: none; }
       .card { background: #fff; border-radius: 14px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding-bottom: 20px; }
 

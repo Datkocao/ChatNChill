@@ -12,5 +12,6 @@
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public string? AvatarKey { get; set; }
         public string? CoverKey { get; set; }
+        public string? PlayerThemeJson { get; set; }   // theme trình phát đã kiểm tra, dạng JSON
     }
 }

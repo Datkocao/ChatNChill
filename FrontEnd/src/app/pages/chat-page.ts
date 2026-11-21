@@ -6,10 +6,12 @@ import { RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AuthService } from '../core/auth.service';
 import { ChatApiService } from '../core/chat-api.service';
-import { ChatHubService, TypingEvent, PresenceEvent, ReadEvent, ProfileEvent } from '../core/chat-hub.service';
+import { ChatHubService, TypingEvent, PresenceEvent, ReadEvent, ProfileEvent, CallEvent } from '../core/chat-hub.service';
 import { ConversationDto, MemberDto, MessageDto } from '../core/models';
 import { FriendsPanel } from './friends-panel';
 import { API_URL } from '../core/config';
+import { CallService } from '../core/call.service';
+import { TrackDirective } from '../core/track.directive';
 
 const PAGE_SIZE = 30;
 const MAX_UPLOAD = 10 * 1024 * 1024; // 10 MB, khớp với backend
@@ -29,7 +31,7 @@ const errorText = (err: HttpErrorResponse, fallback: string): string =>
 @Component({
   selector: 'app-chat-page',
   standalone: true,
-  imports: [FormsModule, DatePipe, FriendsPanel, RouterLink],
+  imports: [FormsModule, DatePipe, FriendsPanel, RouterLink, TrackDirective],
   template: `
     <div class="app">
       <aside class="side">
@@ -40,6 +42,7 @@ const errorText = (err: HttpErrorResponse, fallback: string): string =>
           </div>
                   <div class="me-actions">
             <button type="button" class="ghost" routerLink="/profile">Hồ sơ</button>
+                        <button type="button" class="ghost" routerLink="/music" title="Thư viện nhạc">🎵</button> 
             <button type="button" class="ghost" (click)="logout()">Đăng xuất</button>
           </div>
         </div>
@@ -94,6 +97,53 @@ const errorText = (err: HttpErrorResponse, fallback: string): string =>
       </aside>
 
       <section class="main">
+                @if (incoming(); as inc) {
+          <div class="ring">
+            <div><b>{{ inc.callerName }}</b> đang gọi{{ ringTitle(inc) }}</div>
+            <div class="call-actions">
+              <button type="button" class="primary" (click)="acceptCall()">Tham gia</button>
+              <button type="button" class="plain" (click)="declineCall()">Bỏ qua</button>
+            </div>
+          </div>
+        }
+                @if (call.state() !== 'idle') {
+          <div class="callbar">
+            <div class="call-info">
+              @if (call.state() === 'connecting') {
+                <b>Đang kết nối cuộc gọi...</b>
+              } @else {
+                <b>Đang trong cuộc gọi: {{ callTitle() }}</b>
+                <small>{{ call.participants().join(', ') }}</small>
+              }
+            </div>
+            <div class="call-actions">
+              <button type="button" class="plain" [disabled]="call.state() !== 'connected'" (click)="call.toggleMic()">
+                {{ call.micOn() ? '🎤 Tắt mic' : '🔇 Bật mic' }}
+              </button>
+                            <button type="button" class="plain" [disabled]="call.state() !== 'connected'" (click)="call.toggleCamera()">
+                {{ call.camOn() ? '📷 Tắt camera' : '📷 Bật camera' }}
+              </button>
+              <button type="button" class="danger" (click)="call.leave()">Rời cuộc gọi</button>
+            </div>
+          </div>
+        }
+                @if (call.state() === 'connected') {
+          <div class="grid">
+            @for (t of call.tiles(); track t.id) {
+              <div class="tile" [class.mirror]="t.local">
+                @if (t.video) {
+                  <video [appTrack]="t.video" autoplay playsinline muted></video>
+                } @else {
+                  <div class="tile-ph">{{ initial(t.name) }}</div>
+                }
+                <span class="tile-name">{{ t.name }}{{ t.micOn ? '' : ' 🔇' }}</span>
+              </div>
+            }
+          </div>
+        }
+        @if (call.error()) {
+          <p class="error">{{ call.error() }}</p>
+        }
         @if (active(); as conv) {
           <header>
             <div>
@@ -108,9 +158,14 @@ const errorText = (err: HttpErrorResponse, fallback: string): string =>
                 <small class="online">Đang hoạt động</small>
               }
             </div>
-            @if (conv.type === 'group') {
-              <button type="button" class="plain" (click)="toggleMembers()">Thành viên</button>
-            }
+                        <div class="h-actions">
+              @if (call.state() === 'idle') {
+                <button type="button" class="plain" (click)="startCall(conv.id)">📞 Gọi</button>
+              }
+              @if (conv.type === 'group') {
+                <button type="button" class="plain" (click)="toggleMembers()">Thành viên</button>
+              }
+            </div>
           </header>
 
           <div class="body">
@@ -263,7 +318,7 @@ const errorText = (err: HttpErrorResponse, fallback: string): string =>
   `,
   styles: [
     `
-       :host { display: block; height: 100vh; }
+      :host { display: block; height: calc(100vh - var(--player-h, 0px)); }
       .app { display: grid; grid-template-columns: 320px 1fr; height: 100%; }
       .avatar { flex: none; width: 40px; height: 40px; border-radius: 50%; background: #c7d4fa; color: #3b6df0; display: flex; align-items: center; justify-content: center; font-weight: 600; overflow: hidden; }
       .avatar img { width: 100%; height: 100%; object-fit: cover; }
@@ -312,6 +367,19 @@ const errorText = (err: HttpErrorResponse, fallback: string): string =>
       .h-title { font-weight: 600; }
       header small { color: #667085; }
       .plain { background: none; border: 1px solid #cfd6e0; color: #344054; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+      .h-actions { display: flex; gap: 8px; }
+      .ring { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 18px; background: #fff8e1; border-bottom: 1px solid #ffe082; }
+      .callbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 18px; background: #e8f5e9; border-bottom: 1px solid #c8e6c9; }
+      .call-info small { display: block; color: #667085; }
+      .call-actions { display: flex; gap: 8px; }
+      
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; padding: 10px 18px; background: #101828; max-height: 40vh; overflow-y: auto; }
+      .tile { position: relative; aspect-ratio: 16 / 9; background: #1d2939; border-radius: 10px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+      .tile video { width: 100%; height: 100%; object-fit: cover; }
+      .tile.mirror video { transform: scaleX(-1); }
+      .tile-ph { width: 64px; height: 64px; border-radius: 50%; background: #c7d4fa; color: #3b6df0; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 600; }
+      .tile-name { position: absolute; left: 8px; bottom: 8px; background: rgba(0,0,0,.55); color: #fff; border-radius: 6px; padding: 2px 8px; font-size: 12px; }
+      
 
       .body { flex: 1; display: flex; min-height: 0; }
       .col { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -350,6 +418,9 @@ export class ChatPage implements OnInit, OnDestroy {
   private auth = inject(AuthService);
   private api = inject(ChatApiService);
   private hub = inject(ChatHubService);
+  readonly call = inject(CallService);
+  incoming = signal<CallEvent | null>(null);
+  private incomingTimer: ReturnType<typeof setTimeout> | undefined;
   private subs = new Subscription();
 
   readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');
@@ -440,14 +511,18 @@ export class ChatPage implements OnInit, OnDestroy {
     this.subs.add(this.hub.presence$.subscribe(e => this.onPresence(e)));
     this.subs.add(this.hub.reads$.subscribe(e => this.onRead(e)));
     this.subs.add(this.hub.profileChanged$.subscribe(e => this.onProfileChanged(e)));
+    this.subs.add(this.hub.incomingCall$.subscribe(e => this.onIncomingCall(e)));
 
     this.hub.start().then(() => this.loadOnline()).catch(() => this.error.set('Không kết nối được máy chủ chat.'));
   }
+
 
   ngOnDestroy(): void {
     this.subs.unsubscribe();
     this.typingTimers.forEach(t => clearTimeout(t));
     void this.hub.stop();
+    clearTimeout(this.incomingTimer);
+    void this.call.leave();
   }
 
   logout(): void {
@@ -458,6 +533,47 @@ export class ChatPage implements OnInit, OnDestroy {
       list.some(c => c.id === conv.id) ? list : [conv, ...list]
     );
     this.open(conv.id);
+  }
+
+  startCall(conversationId: number): void {
+    void this.call.join(conversationId).then(() => {
+      // chỉ báo khi mình là người đầu tiên trong phòng, tránh báo lặp khi người khác vào sau
+      if (this.call.state() === 'connected' && this.call.tiles().length === 1) {
+        void this.hub.notifyCall(conversationId);
+      }
+    });
+  }
+
+  private onIncomingCall(e: CallEvent): void {
+    if (this.call.state() !== 'idle') return; // đang trong cuộc gọi thì bỏ qua
+    this.incoming.set(e);
+    clearTimeout(this.incomingTimer);
+    this.incomingTimer = setTimeout(() => this.incoming.set(null), 30000); // tự tắt sau 30 giây
+  }
+
+  acceptCall(): void {
+    const e = this.incoming();
+    if (!e) return;
+    clearTimeout(this.incomingTimer);
+    this.incoming.set(null);
+    this.open(e.conversationId);
+    this.startCall(e.conversationId);
+  }
+
+  declineCall(): void {
+    clearTimeout(this.incomingTimer);
+    this.incoming.set(null);
+  }
+
+  ringTitle(e: CallEvent): string {
+    const c = this.conversations().find(x => x.id === e.conversationId);
+    return c && c.type === 'group' ? ` trong nhóm ${c.name}` : '';
+  }
+
+  // tên cuộc trò chuyện đang có cuộc gọi, để hiện trên thanh trạng thái
+  callTitle(): string {
+    const id = this.call.conversationId();
+    return this.conversations().find(c => c.id === id)?.name ?? '';
   }
 
   // ---------- Mở cuộc trò chuyện, tin nhắn ----------
@@ -704,7 +820,7 @@ export class ChatPage implements OnInit, OnDestroy {
   }
 
   private onIncoming(m: MessageDto): void {
-        // người gửi đã gửi tin thì tắt ngay dòng "đang gõ"
+    // người gửi đã gửi tin thì tắt ngay dòng "đang gõ"
     const typingKey = `${m.conversationId}-${m.senderId}`;
     clearTimeout(this.typingTimers.get(typingKey));
     this.clearTyping(m.conversationId, m.senderId);
@@ -809,7 +925,7 @@ export class ChatPage implements OnInit, OnDestroy {
     });
   }
 
-    private onProfileChanged(e: ProfileEvent): void {
+  private onProfileChanged(e: ProfileEvent): void {
     const patch = (m: MessageDto): MessageDto =>
       m.senderId === e.userId
         ? { ...m, senderName: e.displayName, senderAvatarUrl: e.avatarUrl }
@@ -844,7 +960,7 @@ export class ChatPage implements OnInit, OnDestroy {
   initial(name: string | null | undefined): string {
     return (name ?? '?').trim().charAt(0).toUpperCase() || '?';
   }
-  
+
   fileUrl(path: string | null | undefined): string {
     if (!path) return '';
     // link R2 là địa chỉ đầy đủ; avatar vẫn là đường dẫn tương đối của backend

@@ -1,9 +1,12 @@
 import { Component, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { PlayerBar } from './shared/player-bar';
+
+  
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet],
+  imports: [RouterOutlet, PlayerBar],
   templateUrl: './app.html',
   styleUrl: './app.css'
 })

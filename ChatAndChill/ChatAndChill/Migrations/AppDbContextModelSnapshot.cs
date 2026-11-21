@@ -140,6 +140,25 @@ namespace ChatAndChill.Migrations
                     b.ToTable("Messages");
                 });
 
+            modelBuilder.Entity("ChatAndChill.Models.ThemeImage", b =>
+                {
+                    b.Property<string>("Name")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("OwnerId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Name");
+
+                    b.HasIndex("OwnerId");
+
+                    b.ToTable("ThemeImages");
+                });
+
             modelBuilder.Entity("ChatAndChill.Models.Track", b =>
                 {
                     b.Property<int>("Id")
@@ -215,6 +234,9 @@ namespace ChatAndChill.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("PlayerThemeJson")
+                        .HasColumnType("text");
+
                     b.Property<string>("Username")
                         .IsRequired()
                         .HasColumnType("text");
@@ -282,6 +304,17 @@ namespace ChatAndChill.Migrations
                     b.Navigation("Conversation");
 
                     b.Navigation("Sender");
+                });
+
+            modelBuilder.Entity("ChatAndChill.Models.ThemeImage", b =>
+                {
+                    b.HasOne("ChatAndChill.Models.User", "Owner")
+                        .WithMany()
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Owner");
                 });
 
             modelBuilder.Entity("ChatAndChill.Models.Track", b =>

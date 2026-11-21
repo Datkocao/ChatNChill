@@ -13,6 +13,7 @@ public class AppDbContext : DbContext
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<Friendship> Friendships => Set<Friendship>();
     public DbSet<Track> Tracks => Set<Track>();
+    public DbSet<ThemeImage> ThemeImages => Set<ThemeImage>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<User>()
@@ -32,6 +33,14 @@ public class AppDbContext : DbContext
             e.HasOne(f => f.Addressee).WithMany().HasForeignKey(f => f.AddresseeId)
                 .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(f => new { f.RequesterId, f.AddresseeId }).IsUnique();
+        modelBuilder.Entity<ThemeImage>(e =>
+            {
+                e.HasKey(i => i.Name);
+                e.Property(i => i.Name).HasMaxLength(64);
+                e.HasOne(i => i.Owner).WithMany().HasForeignKey(i => i.OwnerId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                e.HasIndex(i => i.OwnerId);
+            });
         });
 
         modelBuilder.Entity<Track>(e =>

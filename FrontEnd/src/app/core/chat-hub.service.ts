@@ -10,6 +10,7 @@ export interface TypingEvent { conversationId: number; userId: number; name: str
 export interface PresenceEvent { userId: number; online: boolean; }
 export interface ReadEvent { conversationId: number; userId: number; messageId: number; }
 export interface ProfileEvent { userId: number; displayName: string; avatarUrl: string | null; }
+export interface CallEvent { conversationId: number; callerId: number; callerName: string; }
 
 @Injectable({ providedIn: 'root' })
 export class ChatHubService {
@@ -25,6 +26,7 @@ export class ChatHubService {
     readonly friendsChanged$ = new Subject<void>();
     readonly reads$ = new Subject<ReadEvent>();
     readonly profileChanged$ = new Subject<ProfileEvent>();
+    readonly incomingCall$ = new Subject<CallEvent>();
 
     async start(): Promise<void> {
         if (this.connection) return;
@@ -44,6 +46,7 @@ export class ChatHubService {
         conn.on('UserOffline', (userId: number) => this.presence$.next({ userId, online: false }));
         conn.on('MessagesRead', (e: ReadEvent) => this.reads$.next(e));
         conn.on('ProfileChanged', (e: ProfileEvent) => this.profileChanged$.next(e));
+        conn.on('IncomingCall', (e: CallEvent) => this.incomingCall$.next(e));
         conn.onreconnecting(() => this.state.set('reconnecting'));
         conn.onreconnected(() => {
             this.state.set('connected');
@@ -98,6 +101,14 @@ export class ChatHubService {
         }
     }
 
+        async notifyCall(conversationId: number): Promise<void> {
+        if (!this.connection || this.state() !== 'connected') return;
+        try {
+            await this.connection.invoke('NotifyCall', conversationId);
+        } catch {
+            // báo cuộc gọi không quan trọng, bỏ qua lỗi
+        }
+    }
 
     async markRead(conversationId: number, messageId: number): Promise<void> {
         if (!this.connection || this.state() !== 'connected') return;
