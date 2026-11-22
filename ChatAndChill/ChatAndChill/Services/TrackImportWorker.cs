@@ -5,6 +5,7 @@ using ChatAndChill.Data;
 using ChatAndChill.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Security.Cryptography;
 
 namespace ChatAndChill.Services;
 
@@ -38,7 +39,7 @@ public class TrackImportWorker : BackgroundService
         _log = log;
     }
 
-    private sealed record Metadata(string Title, string? Artist, int Seconds);
+    private sealed record Metadata(string Id, string Title, string? Artist, int Seconds);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -116,10 +117,20 @@ public class TrackImportWorker : BackgroundService
             imp.Title = Clip(meta.Title, 150);
             await db.SaveChangesAsync(ct);
 
-            var used = await db.Tracks.Where(t => t.OwnerId == imp.OwnerId)
-                .SumAsync(t => (long?)t.SizeBytes, ct) ?? 0;
-            if (used >= MusicLimits.QuotaBytes)
-                throw new ImportException("Thư viện nhạc đã đầy, hãy xoá bớt bài rồi thử lại.");
+            var ownerId = imp.OwnerId;
+            var sourceId = $"youtube:{meta.Id}";
+
+            // 1b. Bài này đã có trong kho: bỏ qua tải, chỉ thêm vào danh sách của người nhập
+            var existing = await db.Tracks.FirstOrDefaultAsync(t => t.SourceId == sourceId, ct);
+            if (existing is not null)
+            {
+                await FinishWithExistingAsync(db, importId, ownerId, existing.Id, ct);
+                return;
+            }
+
+            var total = await db.Tracks.SumAsync(t => (long?)t.SizeBytes, ct) ?? 0;
+            if (total >= MusicLimits.LibraryQuotaBytes)
+                throw new ImportException("Kho nhạc chung đã đầy.");
 
             // 2. Tải và đổi sang mp3
             var mp3 = await DownloadMp3Async(ytdlp, imp.Url, tempDir, ct);
@@ -128,31 +139,62 @@ public class TrackImportWorker : BackgroundService
                 throw new ImportException("File tải về quá lớn hoặc bị lỗi.");
             if (!LooksLikeMp3(mp3))
                 throw new ImportException("File tải về không phải âm thanh hợp lệ.");
-            if (used + length > MusicLimits.QuotaBytes)
-                throw new ImportException("Thư viện nhạc đã đầy, hãy xoá bớt bài rồi thử lại.");
+            if (total + length > MusicLimits.LibraryQuotaBytes)
+                throw new ImportException("Kho nhạc chung đã đầy.");
 
-            // 3. Đưa lên R2 (tên ngẫu nhiên, giống upload thường)
-            var key = $"music/{imp.OwnerId}/{Guid.NewGuid():N}.mp3";
+            string hash;
+            await using (var hs = File.OpenRead(mp3))
+            {
+                hash = Convert.ToHexString(await SHA256.HashDataAsync(hs, ct)).ToLowerInvariant();
+            }
+
+            // 3. Đưa lên R2 (tên ngẫu nhiên, nằm chung trong music/)
+            var key = $"music/{Guid.NewGuid():N}.mp3";
             await using (var fs = File.OpenRead(mp3))
             {
                 await r2.UploadAsync(key, fs, "audio/mpeg", ct);
             }
             uploadedKey = key;
 
-            // 4. Tạo bài và xoá dòng nhập trong cùng một lần lưu
-            db.Tracks.Add(new Track
+            // 4. Tạo bài, thêm vào danh sách người nhập và xoá dòng nhập trong cùng một giao dịch
+            var track = new Track
             {
-                OwnerId = imp.OwnerId,
+                UploaderId = ownerId,
                 Title = Clip(meta.Title, 150),
                 Artist = meta.Artist is null ? null : Clip(meta.Artist, 100),
                 DurationSeconds = meta.Seconds,
                 ObjectKey = key,
                 ContentType = "audio/mpeg",
-                SizeBytes = length
-            });
-            db.TrackImports.Remove(imp);
-            await db.SaveChangesAsync(ct);
-            uploadedKey = null;   // đã lưu xong, không cần dọn
+                SizeBytes = length,
+                Origin = TrackOrigin.Youtube,
+                SourceId = sourceId,
+                ContentHash = hash
+            };
+
+            try
+            {
+                await using var tx = await db.Database.BeginTransactionAsync(ct);
+                db.Tracks.Add(track);
+                await db.SaveChangesAsync(ct);
+
+                db.UserTracks.Add(new UserTrack { UserId = ownerId, TrackId = track.Id });
+                db.TrackImports.Remove(imp);
+                await db.SaveChangesAsync(ct);
+
+                await tx.CommitAsync(ct);
+                uploadedKey = null;   // đã lưu xong, không cần dọn
+            }
+            catch (DbUpdateException)
+            {
+                // hai bên nhập cùng một bài cùng lúc (trùng SourceId hoặc ContentHash): dùng bài đã có
+                db.ChangeTracker.Clear();
+                var dup = await db.Tracks.FirstOrDefaultAsync(
+                    t => t.SourceId == sourceId || t.ContentHash == hash, ct);
+                if (dup is null) throw;
+
+                await FinishWithExistingAsync(db, importId, ownerId, dup.Id, ct);
+                // uploadedKey vẫn còn giá trị nên khối finally sẽ xoá file vừa tải lên R2
+            }
         }
         catch (ImportException ex)
         {
@@ -174,6 +216,19 @@ public class TrackImportWorker : BackgroundService
                 await r2.DeleteAsync(new[] { uploadedKey });   // không để file mồ côi trên R2
             try { Directory.Delete(tempDir, recursive: true); } catch { /* bỏ qua */ }
         }
+    }
+
+    // Bài đã có trong kho: chỉ thêm vào danh sách của người nhập và xoá dòng nhập
+    private static async Task FinishWithExistingAsync(
+        AppDbContext db, int importId, int ownerId, int trackId, CancellationToken ct)
+    {
+        if (!await db.UserTracks.AnyAsync(u => u.UserId == ownerId && u.TrackId == trackId, ct))
+            db.UserTracks.Add(new UserTrack { UserId = ownerId, TrackId = trackId });
+
+        var row = await db.TrackImports.FirstOrDefaultAsync(i => i.Id == importId, ct);
+        if (row is not null) db.TrackImports.Remove(row);
+
+        await db.SaveChangesAsync(ct);
     }
 
     // Dùng DbContext mới vì context cũ có thể đang ở trạng thái lỗi sau một lần SaveChanges hỏng
@@ -231,9 +286,13 @@ public class TrackImportWorker : BackgroundService
             if (seconds > MaxDurationSeconds)
                 throw new ImportException($"Bài dài quá {MaxDurationSeconds / 60} phút.");
 
+            var id = Str(root, "id");
+            if (id is null || id.Length is < 6 or > 20 || !id.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
+                throw new ImportException("Không xác định được mã video.");
+
             var title = Str(root, "title") ?? "Không tên";
             var artist = Str(root, "artist") ?? Str(root, "uploader") ?? Str(root, "channel");
-            return new Metadata(title, artist, seconds);
+            return new Metadata(id, title, artist, seconds);
         }
     }
 
@@ -256,7 +315,7 @@ public class TrackImportWorker : BackgroundService
     }
 
     // Chạy một chương trình ngoài. Truyền tham số qua ArgumentList (không ghép chuỗi lệnh)
-    private static async Task<(int Code, string Output, string Error)> RunAsync(
+    internal static async Task<(int Code, string Output, string Error)> RunAsync(
         string exe, IReadOnlyList<string> args, string workDir, TimeSpan timeout, CancellationToken ct)
     {
         var psi = new ProcessStartInfo(exe)

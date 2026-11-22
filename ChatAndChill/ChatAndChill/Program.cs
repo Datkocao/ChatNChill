@@ -54,6 +54,7 @@ namespace ChatAndChill
             builder.Services.AddSingleton<R2StorageService>();
             builder.Services.Configure<ToolsOptions>(builder.Configuration.GetSection("Tools"));
             builder.Services.AddSingleton<TrackImportQueue>();
+            builder.Services.AddSingleton<YoutubeSearchService>();
             builder.Services.AddHostedService<TrackImportWorker>();
 
             builder.Services.AddCors(options =>

@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { API_URL } from './config';
@@ -10,12 +10,30 @@ export interface TrackDto {
   durationSeconds: number | null;
   sizeBytes: number;
   createdAt: string;
+  uploaderId: number;
+  uploaderName?: string | null;
+  origin: string;        // 'Upload' | 'Youtube'
+  inLibrary: boolean;    // đã nằm trong danh sách của mình chưa
 }
 
 export interface TrackList {
   tracks: TrackDto[];
   usedBytes: number;
   quotaBytes: number;
+}
+
+export interface SearchResult {
+  videoId: string;
+  title: string;
+  channel: string | null;
+  durationSeconds: number;
+}
+
+export interface LibraryPage {
+  tracks: TrackDto[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 // Khớp với giới hạn ở MusicController, dùng để kiểm tra trước khi upload
@@ -46,6 +64,23 @@ export class MusicApiService {
 
   delete(id: number): Observable<void> {
     return this.http.delete<void>(`${this.base}/tracks/${id}`);
+  }
+
+    // Kho chung: tìm kiếm + phân trang
+  library(q: string, page: number): Observable<LibraryPage> {
+    let params = new HttpParams().set('page', page);
+    if (q) params = params.set('q', q);
+    return this.http.get<LibraryPage>(`${this.base}/library`, { params });
+  }
+
+  // Thêm một bài trong kho vào danh sách của mình
+  addToMine(id: number): Observable<void> {
+    return this.http.post<void>(`${this.base}/tracks/${id}/add`, {});
+  }
+
+    // Tìm bài trên YouTube theo tên (tối đa 5 kết quả)
+  search(q: string): Observable<SearchResult[]> {
+    return this.http.get<SearchResult[]>(`${this.base}/search`, { params: new HttpParams().set('q', q) });
   }
 
   // Đọc độ dài bài từ chính file (giây), để gửi kèm khi upload

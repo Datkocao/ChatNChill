@@ -13,9 +13,11 @@ public class AppDbContext : DbContext
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<Friendship> Friendships => Set<Friendship>();
     public DbSet<Track> Tracks => Set<Track>();
+    public DbSet<UserTrack> UserTracks => Set<UserTrack>();
     public DbSet<ThemeImage> ThemeImages => Set<ThemeImage>();
     public DbSet<TrackImport> TrackImports => Set<TrackImport>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
+
     {
         modelBuilder.Entity<User>()
             .HasIndex(u => u.Username)
@@ -46,9 +48,14 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<Track>(e =>
         {
-            e.HasOne(t => t.Owner).WithMany().HasForeignKey(t => t.OwnerId)
-                .OnDelete(DeleteBehavior.Cascade);
-            e.HasIndex(t => new { t.OwnerId, t.Id });
+            e.HasOne(t => t.Owner).WithMany().HasForeignKey(t => t.UploaderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(t => new { t.UploaderId, t.Id });
+            e.Property(t => t.Origin).HasMaxLength(16);
+            e.Property(t => t.ContentHash).HasMaxLength(64);
+            e.Property(t => t.SourceId).HasMaxLength(100);
+            e.HasIndex(t => t.ContentHash).IsUnique();
+            e.HasIndex(t => t.SourceId).IsUnique();
         });
 
         modelBuilder.Entity<TrackImport>(e =>
@@ -60,5 +67,14 @@ public class AppDbContext : DbContext
             e.Property(i => i.Error).HasMaxLength(300);
             e.HasIndex(i => new { i.OwnerId, i.Id });
         });
+
+        modelBuilder.Entity<UserTrack>(e =>
+        {
+            e.HasKey(x => new { x.UserId, x.TrackId });
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Track>().WithMany().HasForeignKey(x => x.TrackId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.TrackId);   // để đếm nhanh "còn ai dùng bài này"
+        });
+
     }
 }

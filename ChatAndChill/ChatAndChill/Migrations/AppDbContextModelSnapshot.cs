@@ -170,6 +170,10 @@ namespace ChatAndChill.Migrations
                     b.Property<string>("Artist")
                         .HasColumnType("text");
 
+                    b.Property<string>("ContentHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("ContentType")
                         .IsRequired()
                         .HasColumnType("text");
@@ -184,19 +188,34 @@ namespace ChatAndChill.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<int>("OwnerId")
-                        .HasColumnType("integer");
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
 
                     b.Property<long>("SizeBytes")
                         .HasColumnType("bigint");
+
+                    b.Property<string>("SourceId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int>("UploaderId")
+                        .HasColumnType("integer");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("OwnerId", "Id");
+                    b.HasIndex("ContentHash")
+                        .IsUnique();
+
+                    b.HasIndex("SourceId")
+                        .IsUnique();
+
+                    b.HasIndex("UploaderId", "Id");
 
                     b.ToTable("Tracks");
                 });
@@ -286,6 +305,24 @@ namespace ChatAndChill.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("ChatAndChill.Models.UserTrack", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("TrackId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("AddedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("UserId", "TrackId");
+
+                    b.HasIndex("TrackId");
+
+                    b.ToTable("UserTracks");
+                });
+
             modelBuilder.Entity("ChatAndChill.Models.ConversationMember", b =>
                 {
                     b.HasOne("ChatAndChill.Models.Conversation", "Conversation")
@@ -358,8 +395,8 @@ namespace ChatAndChill.Migrations
                 {
                     b.HasOne("ChatAndChill.Models.User", "Owner")
                         .WithMany()
-                        .HasForeignKey("OwnerId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasForeignKey("UploaderId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("Owner");
@@ -374,6 +411,21 @@ namespace ChatAndChill.Migrations
                         .IsRequired();
 
                     b.Navigation("Owner");
+                });
+
+            modelBuilder.Entity("ChatAndChill.Models.UserTrack", b =>
+                {
+                    b.HasOne("ChatAndChill.Models.Track", null)
+                        .WithMany()
+                        .HasForeignKey("TrackId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ChatAndChill.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ChatAndChill.Models.Conversation", b =>

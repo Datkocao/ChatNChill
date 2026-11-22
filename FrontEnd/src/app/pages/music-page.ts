@@ -1,7 +1,7 @@
 import { Component, OnInit, computed, inject, signal, OnDestroy } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import {MUSIC_EXTENSIONS,MUSIC_MAX_FILE_BYTES,MusicApiService,TrackDto,} from '../core/music-api.service';
+import {MUSIC_EXTENSIONS,MUSIC_MAX_FILE_BYTES,MusicApiService,SearchResult, TrackDto,} from '../core/music-api.service';
 import { PlayerService } from '../core/player.service';
 import { AuthService } from '../core/auth.service';
 import { ImportApiService, ImportDto } from '../core/import-api.service';
@@ -19,9 +19,13 @@ import { ImportApiService, ImportDto } from '../core/import-api.service';
 
       <div class="quota">
         <div class="meter"><div class="fill" [style.width.%]="usedPercent()"></div></div>
-        <span>{{ mb(used()) }} / {{ mb(quota()) }} MB</span>
+                <span>Kho chung: {{ size(used()) }} / {{ size(quota()) }}</span>
       </div>
 
+            <div class="tabs">
+        <button [class.on]="tab() === 'mine'" (click)="setTab('mine')">Danh sách của tôi</button>
+        <button [class.on]="tab() === 'library'" (click)="setTab('library')">Kho chung</button>
+      </div>
       <div class="upload">
         <label class="btn">
           {{ uploading() ? 'Đang tải lên...' : '+ Thêm nhạc' }}
@@ -32,15 +36,32 @@ import { ImportApiService, ImportDto } from '../core/import-api.service';
       </div>
 
             <div class="import">
-        <input type="url" placeholder="Dán link YouTube để thêm bài..."
-               [value]="link()" (input)="link.set($any($event.target).value)"
-               (keydown.enter)="startImport()" [disabled]="importing()" />
-        <button (click)="startImport()" [disabled]="importing() || !link().trim()">
-          {{ importing() ? 'Đang gửi...' : 'Nhập từ link' }}
-        </button>
+       <input type="text" placeholder="Dán link YouTube hoặc gõ tên bài..."
+       [value]="link()" (input)="link.set($any($event.target).value)"
+       (keydown.enter)="startImport()" [disabled]="importing() || searching()" />
+           <button (click)="startImport()" [disabled]="importing() || searching() || !link().trim()">
+       {{ importing() ? 'Đang gửi...' : searching() ? 'Đang tìm...' : 'Tìm / Nhập' }}
+     </button>
       </div>
       @if (importError()) {
         <div class="error">{{ importError() }}</div>
+      }
+              @if (results().length > 0) {
+        <div class="results">
+          @for (r of results(); track r.videoId) {
+            <div class="res">
+              <span class="meta">
+                <span class="title">{{ r.title }}</span>
+                <span class="artist">{{ r.channel || 'Không rõ kênh' }}</span>
+              </span>
+              <span class="dur">{{ fmt(r.durationSeconds) }}</span>
+              <button (click)="pick(r)" [disabled]="importing()">+ Nhập</button>
+            </div>
+          }
+          <button class="close" (click)="results.set([])">Đóng</button>
+        </div>
+      } @else if (searched()) {
+        <div class="imp">Không tìm thấy bài phù hợp (bài quá 15 phút hoặc video trực tiếp bị loại).</div>
       }
       @for (i of imports(); track i.id) {
         <div class="imp" [class.failed]="i.status === 'failed'">
@@ -58,30 +79,63 @@ import { ImportApiService, ImportDto } from '../core/import-api.service';
         <div class="error">{{ e }}</div>
       }
 
-      @if (loading()) {
-        <p>Đang tải...</p>
-      } @else if (tracks().length === 0) {
-        <p>Chưa có bài nào. Bấm "Thêm nhạc" để bắt đầu.</p>
+           @if (tab() === 'mine') {
+        @if (loading()) {
+          <p>Đang tải...</p>
+        } @else if (tracks().length === 0) {
+          <p>Chưa có bài nào. Bấm "Thêm nhạc" hoặc sang tab "Kho chung" để thêm bài vào danh sách.</p>
+        } @else {
+          <div class="actions">
+            <button (click)="play(0)">▶ Phát tất cả</button>
+          </div>
+          <ul class="list">
+            @for (t of tracks(); track t.id; let i = $index) {
+              <li [class.current]="player.currentTrack()?.id === t.id">
+                <button class="row" (click)="play(i)">
+                  <span class="idx">{{ player.currentTrack()?.id === t.id && player.isPlaying() ? '🔊' : i + 1 }}</span>
+                  <span class="meta">
+                    <span class="title">{{ t.title }}</span>
+                    <span class="artist">{{ t.artist || 'Không rõ nghệ sĩ' }}</span>
+                  </span>
+                  <span class="dur">{{ fmt(t.durationSeconds) }}</span>
+                  <span class="size">{{ mb(t.sizeBytes) }} MB</span>
+                </button>
+                <button class="del" (click)="remove(t)" title="Bỏ khỏi danh sách">🗑</button>
+              </li>
+            }
+          </ul>
+        }
       } @else {
-        <div class="actions">
-          <button (click)="play(0)">▶ Phát tất cả</button>
+        <div class="search">
+          <input type="search" placeholder="Tìm theo tên bài hoặc nghệ sĩ..."
+                 [value]="libQuery()" (input)="libQuery.set($any($event.target).value)"
+                 (keydown.enter)="loadLibrary(1)" />
+          <button (click)="loadLibrary(1)">Tìm</button>
         </div>
-        <ul class="list">
-          @for (t of tracks(); track t.id; let i = $index) {
-            <li [class.current]="player.currentTrack()?.id === t.id">
-              <button class="row" (click)="play(i)">
-                <span class="idx">{{ player.currentTrack()?.id === t.id && player.isPlaying() ? '🔊' : i + 1 }}</span>
-                <span class="meta">
-                  <span class="title">{{ t.title }}</span>
-                  <span class="artist">{{ t.artist || 'Không rõ nghệ sĩ' }}</span>
-                </span>
-                <span class="dur">{{ fmt(t.durationSeconds) }}</span>
-                <span class="size">{{ mb(t.sizeBytes) }} MB</span>
+        @if (libLoading()) {
+          <p>Đang tải...</p>
+        } @else if (libTracks().length === 0) {
+          <p>Không có bài nào trong kho.</p>
+        } @else {
+          @for (t of libTracks(); track t.id) {
+            <div class="lrow">
+              <span class="meta">
+                <span class="title">{{ t.title }}@if (t.origin === 'Youtube') {<span class="tag">YouTube</span>}</span>
+                <span class="artist">{{ t.artist || 'Không rõ nghệ sĩ' }} · đăng bởi {{ t.uploaderName || '?' }}</span>
+              </span>
+              <span class="dur">{{ fmt(t.durationSeconds) }}</span>
+              <span class="size">{{ mb(t.sizeBytes) }} MB</span>
+              <button class="add" [disabled]="t.inLibrary" (click)="addToMine(t)">
+                {{ t.inLibrary ? '✓ Đã thêm' : '+ Thêm vào danh sách' }}
               </button>
-              <button class="del" (click)="remove(t)" title="Xoá">🗑</button>
-            </li>
+            </div>
           }
-        </ul>
+          <div class="paging">
+            <button [disabled]="libPage() <= 1" (click)="loadLibrary(libPage() - 1)">‹ Trước</button>
+            <span>Trang {{ libPage() }} / {{ libPages() }} ({{ libTotal() }} bài)</span>
+            <button [disabled]="libPage() >= libPages()" (click)="loadLibrary(libPage() + 1)">Sau ›</button>
+          </div>
+        }
       }
     </div>
   `,
@@ -119,7 +173,25 @@ import { ImportApiService, ImportDto } from '../core/import-api.service';
     .artist { font-size: 12px; color: #777; }
     .dur, .size { font-size: 12px; color: #777; text-align: right; }
     .del { background: none; border: none; cursor: pointer; font-size: 16px; padding: 8px; }
-  `,
+    .results { background: #f3f6ff; border-radius: 8px; padding: 6px 10px; margin: 6px 0; }
+    .res { display: grid; grid-template-columns: 1fr 56px 80px; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #e3e6ec; }
+    .res button { padding: 4px 10px; border: 1px solid #4f7cff; border-radius: 6px; background: #fff; color: #4f7cff; cursor: pointer; }
+    .res button:disabled { opacity: .5; cursor: default; }
+    .results .close { margin-top: 6px; padding: 2px 10px; border: 1px solid #ccd; border-radius: 6px; background: #fff; cursor: pointer; }
+    .tabs { display: flex; gap: 8px; margin: 12px 0; }
+    .tabs button { padding: 6px 14px; border: 1px solid #ccd; border-radius: 8px; background: #fff; cursor: pointer; font: inherit; }
+    .tabs button.on { background: #4f7cff; color: #fff; border-color: #4f7cff; }
+    .search { display: flex; gap: 8px; margin: 8px 0; }
+    .search input { flex: 1; padding: 8px 10px; border: 1px solid #ccd; border-radius: 8px; font: inherit; }
+    .search button { padding: 8px 14px; border: none; border-radius: 8px; background: #4f7cff; color: #fff; cursor: pointer; }
+    .lrow { display: grid; grid-template-columns: 1fr 56px 72px 150px; align-items: center; gap: 8px; padding: 8px 6px; border-bottom: 1px solid #eee; }
+    .lrow .add { padding: 4px 10px; border: 1px solid #4f7cff; border-radius: 6px; background: #fff; color: #4f7cff; cursor: pointer; }
+    .lrow .add:disabled { border-color: #ccd; color: #777; cursor: default; }
+    .tag { font-size: 10px; background: #eee; border-radius: 4px; padding: 1px 5px; margin-left: 6px; color: #555; }
+    .paging { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 12px 0; font-size: 13px; }
+    .paging button { padding: 4px 12px; border: 1px solid #ccd; border-radius: 6px; background: #fff; cursor: pointer; }
+    .paging button:disabled { opacity: .5; cursor: default; }
+    `,
 })
 export class MusicPage implements OnInit, OnDestroy {
   private api = inject(MusicApiService);
@@ -129,6 +201,9 @@ export class MusicPage implements OnInit, OnDestroy {
   protected link = signal('');
   protected importing = signal(false);
   protected importError = signal('');
+  protected results = signal<SearchResult[]>([]);
+  protected searching = signal(false);
+  protected searched = signal(false);   // đã tìm xong (để hiện "không tìm thấy" khi không có kết quả)
   protected imports = signal<ImportDto[]>([]);
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   protected tracks = signal<TrackDto[]>([]);
@@ -137,6 +212,15 @@ export class MusicPage implements OnInit, OnDestroy {
   protected loading = signal(true);
   protected uploading = signal(false);
   protected errors = signal<string[]>([]);
+  protected tab = signal<'mine' | 'library'>('mine');
+  protected libTracks = signal<TrackDto[]>([]);
+  protected libTotal = signal(0);
+  protected libPage = signal(1);
+  protected libPageSize = signal(30);
+  protected libQuery = signal('');
+  protected libLoading = signal(false);
+  protected libPages = computed(() =>
+    Math.max(1, Math.ceil(this.libTotal() / this.libPageSize())));
   protected usedPercent = computed(() =>
     this.quota() > 0 ? Math.min(100, (this.used() / this.quota()) * 100) : 0);
 
@@ -151,6 +235,7 @@ export class MusicPage implements OnInit, OnDestroy {
         this.tracks.set(r.tracks);
         this.used.set(r.usedBytes);
         this.quota.set(r.quotaBytes);
+        if (this.tab() === 'library') this.loadLibrary(this.libPage());
         this.loading.set(false);
       },
       error: e => {
@@ -197,16 +282,52 @@ export class MusicPage implements OnInit, OnDestroy {
     this.reload();
   }
 
-    protected startImport(): void {
-    const url = this.link().trim();
-    if (!url || this.importing()) return;
+     protected startImport(): void {
+    const text = this.link().trim();
+    if (!text || this.importing() || this.searching()) return;
 
+    if (/^https?:\/\//i.test(text)) this.sendImport(text);
+    else this.search(text);
+  }
+
+  // Tìm theo tên: hiện tối đa 5 kết quả để chọn
+  private search(q: string): void {
+    if (q.length < 2) {
+      this.importError.set('Gõ ít nhất 2 ký tự để tìm.');
+      return;
+    }
+    this.searching.set(true);
+    this.searched.set(false);
+    this.importError.set('');
+    this.results.set([]);
+    this.api.search(q).subscribe({
+      next: r => {
+        this.results.set(r);
+        this.searched.set(true);
+        this.searching.set(false);
+      },
+      error: e => {
+        this.searching.set(false);
+        this.importError.set(this.msg(e, 'Không tìm được bài.'));
+      },
+    });
+  }
+
+  // Chọn một kết quả tìm kiếm để nhập
+  protected pick(r: SearchResult): void {
+    if (this.importing()) return;
+    this.sendImport(`https://www.youtube.com/watch?v=${r.videoId}`);
+  }
+
+  private sendImport(url: string): void {
     this.importing.set(true);
     this.importError.set('');
     this.importApi.start(url).subscribe({
       next: imp => {
         this.importing.set(false);
         this.link.set('');
+        this.results.set([]);
+        this.searched.set(false);
         this.imports.update(list => [imp, ...list]);
         this.startPolling();
       },
@@ -259,8 +380,41 @@ export class MusicPage implements OnInit, OnDestroy {
     this.stopPolling();
   }
 
+    protected setTab(t: 'mine' | 'library'): void {
+    this.tab.set(t);
+    if (t === 'library') this.loadLibrary(1);
+  }
+
+  protected loadLibrary(page: number): void {
+    this.libLoading.set(true);
+    this.api.library(this.libQuery().trim(), page).subscribe({
+      next: r => {
+        this.libTracks.set(r.tracks);
+        this.libTotal.set(r.total);
+        this.libPage.set(r.page);
+        this.libPageSize.set(r.pageSize);
+        this.libLoading.set(false);
+      },
+      error: e => {
+        this.libLoading.set(false);
+        this.errors.set([this.msg(e, 'Không tải được kho nhạc chung.')]);
+      },
+    });
+  }
+
+  protected addToMine(t: TrackDto): void {
+    this.api.addToMine(t.id).subscribe({
+      next: () => this.reload(),   // tải lại danh sách của mình (và kho nếu đang ở tab kho)
+      error: e => this.errors.set([this.msg(e, 'Không thêm được bài.')]),
+    });
+  }
+
+  protected size(bytes: number): string {
+    return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : `${this.mb(bytes)} MB`;
+  }
+
   protected remove(t: TrackDto): void {
-    if (!confirm(`Xoá "${t.title}" khỏi thư viện?`)) return;
+        if (!confirm(`Bỏ "${t.title}" khỏi danh sách của bạn?`)) return;
     this.api.delete(t.id).subscribe({
       next: () => {
         this.player.removeTrack(t.id);
