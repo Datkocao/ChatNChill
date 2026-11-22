@@ -52,6 +52,9 @@ namespace ChatAndChill
             builder.Services.AddScoped<TokenService>();
             builder.Services.Configure<R2Options>(builder.Configuration.GetSection("R2"));
             builder.Services.AddSingleton<R2StorageService>();
+            builder.Services.Configure<ToolsOptions>(builder.Configuration.GetSection("Tools"));
+            builder.Services.AddSingleton<TrackImportQueue>();
+            builder.Services.AddHostedService<TrackImportWorker>();
 
             builder.Services.AddCors(options =>
             {

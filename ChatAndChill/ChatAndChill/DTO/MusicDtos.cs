@@ -21,3 +21,17 @@ public class TrackUrlDto
 {
     public string Url { get; set; } = "";
 }
+public class ImportRequest
+{
+    public string? Url { get; set; }
+}
+
+public class ImportDto
+{
+    public int Id { get; set; }
+    public string Url { get; set; } = "";
+    public string? Title { get; set; }
+    public string Status { get; set; } = "";   // queued | processing | failed
+    public string? Error { get; set; }
+    public DateTime CreatedAt { get; set; }
+}

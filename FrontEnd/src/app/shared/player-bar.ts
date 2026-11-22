@@ -93,7 +93,16 @@ import { PlayerThemeService } from '../core/player-theme.service';
     }
     .buttons button.on { opacity: 1; background: color-mix(in srgb, var(--pt-accent, #3b6df0) 30%, transparent); }
     .buttons button.play { font-size: 22px; opacity: 1; }
-    .limit { width: 48px; }
+        .limit {
+      width: 44px; height: 24px; box-sizing: border-box; padding: 0 6px;
+      font: inherit; font-size: 12px; text-align: center; color: inherit;
+      background: color-mix(in srgb, currentColor 12%, transparent);
+      border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+      border-radius: 6px; outline: none; -moz-appearance: textfield;
+    }
+    .limit:focus { border-color: var(--pt-accent, #3b6df0); }
+    .limit::placeholder { color: inherit; opacity: .6; }
+    .limit::-webkit-inner-spin-button, .limit::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
     .count { font-size: 12px; opacity: .8; }
     .seek { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; }
       .seek input {

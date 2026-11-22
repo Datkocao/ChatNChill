@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
     public DbSet<Friendship> Friendships => Set<Friendship>();
     public DbSet<Track> Tracks => Set<Track>();
     public DbSet<ThemeImage> ThemeImages => Set<ThemeImage>();
+    public DbSet<TrackImport> TrackImports => Set<TrackImport>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<User>()
@@ -48,6 +49,16 @@ public class AppDbContext : DbContext
             e.HasOne(t => t.Owner).WithMany().HasForeignKey(t => t.OwnerId)
                 .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(t => new { t.OwnerId, t.Id });
+        });
+
+        modelBuilder.Entity<TrackImport>(e =>
+        {
+            e.HasOne(i => i.Owner).WithMany().HasForeignKey(i => i.OwnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.Property(i => i.Url).HasMaxLength(300);
+            e.Property(i => i.Title).HasMaxLength(150);
+            e.Property(i => i.Error).HasMaxLength(300);
+            e.HasIndex(i => new { i.OwnerId, i.Id });
         });
     }
 }

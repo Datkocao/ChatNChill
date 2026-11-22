@@ -201,6 +201,43 @@ namespace ChatAndChill.Migrations
                     b.ToTable("Tracks");
                 });
 
+            modelBuilder.Entity("ChatAndChill.Models.TrackImport", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int>("OwnerId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "Id");
+
+                    b.ToTable("TrackImports");
+                });
+
             modelBuilder.Entity("ChatAndChill.Models.User", b =>
                 {
                     b.Property<int>("Id")
@@ -318,6 +355,17 @@ namespace ChatAndChill.Migrations
                 });
 
             modelBuilder.Entity("ChatAndChill.Models.Track", b =>
+                {
+                    b.HasOne("ChatAndChill.Models.User", "Owner")
+                        .WithMany()
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Owner");
+                });
+
+            modelBuilder.Entity("ChatAndChill.Models.TrackImport", b =>
                 {
                     b.HasOne("ChatAndChill.Models.User", "Owner")
                         .WithMany()

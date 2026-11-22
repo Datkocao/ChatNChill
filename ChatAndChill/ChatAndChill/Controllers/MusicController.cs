@@ -14,8 +14,9 @@ namespace ChatAndChill.Controllers;
 [Route("api/[controller]")]
 public class MusicController : ControllerBase
 {
-    private const long MaxFileBytes = 30L * 1024 * 1024;  // 30 MB mỗi bài
-    private const long QuotaBytes = 200L * 1024 * 1024;   // 200 MB mỗi người
+    private const long MaxFileBytes = MusicLimits.MaxFileBytes;   // 30 MB mỗi bài
+    private const long QuotaBytes = MusicLimits.QuotaBytes;       // 200 MB mỗi người
+    private const int MaxActiveImports = 3;                       // số bài đang nhập cùng lúc của mỗi người
     private static readonly TimeSpan LinkLifetime = TimeSpan.FromHours(6);
 
     private static readonly Dictionary<string, string> AllowedTypes =
@@ -30,11 +31,13 @@ public class MusicController : ControllerBase
 
     private readonly AppDbContext _db;
     private readonly R2StorageService _r2;
+    private readonly TrackImportQueue _queue;
 
-    public MusicController(AppDbContext db, R2StorageService r2)
+    public MusicController(AppDbContext db, R2StorageService r2, TrackImportQueue queue)
     {
         _db = db;
         _r2 = r2;
+        _queue = queue;
     }
 
     // Thư viện nhạc của mình + dung lượng đã dùng
@@ -165,7 +168,80 @@ public class MusicController : ControllerBase
         return NoContent();
     }
 
+    // Bắt đầu nhập một bài từ link: trả về ngay, việc tải chạy nền
+    [HttpPost("imports")]
+    public async Task<ActionResult<ImportDto>> StartImport(ImportRequest req)
+    {
+        var me = User.GetUserId();
+
+        if (!ImportUrlValidator.TryNormalize(req.Url, out var url))
+            return BadRequest(new { message = "Chỉ nhận link YouTube (youtube.com, youtu.be)." });
+
+        var used = await _db.Tracks
+            .Where(t => t.OwnerId == me)
+            .SumAsync(t => (long?)t.SizeBytes) ?? 0;
+        if (used >= QuotaBytes)
+            return BadRequest(new { message = $"Thư viện nhạc đã đầy (tối đa {QuotaBytes / 1024 / 1024} MB). Hãy xoá bớt bài." });
+
+        var active = await _db.TrackImports
+            .Where(i => i.OwnerId == me && i.Status != ImportStatus.Failed)
+            .Select(i => i.Url)
+            .ToListAsync();
+        if (active.Contains(url))
+            return BadRequest(new { message = "Link này đang được xử lý." });
+        if (active.Count >= MaxActiveImports)
+            return BadRequest(new { message = $"Bạn đang có {MaxActiveImports} bài đang nhập, hãy chờ xong rồi thêm tiếp." });
+
+        var imp = new TrackImport { OwnerId = me, Url = url };
+        _db.TrackImports.Add(imp);
+        await _db.SaveChangesAsync();
+
+        _queue.Enqueue(imp.Id);
+        return Accepted(ToImportDto(imp));
+    }
+
+    // Các lần nhập đang chạy hoặc bị lỗi của mình (nhập xong thì biến mất, bài nằm trong thư viện)
+    [HttpGet("imports")]
+    public async Task<ActionResult<List<ImportDto>>> ListImports()
+    {
+        var me = User.GetUserId();
+
+        var rows = await _db.TrackImports
+            .Where(i => i.OwnerId == me)
+            .OrderByDescending(i => i.Id)
+            .ToListAsync();
+
+        return Ok(rows.Select(ToImportDto).ToList());
+    }
+
+    // Bỏ một lần nhập bị lỗi khỏi danh sách
+    [HttpDelete("imports/{id:int}")]
+    public async Task<IActionResult> DismissImport(int id)
+    {
+        var me = User.GetUserId();
+
+        var imp = await _db.TrackImports.FirstOrDefaultAsync(i => i.Id == id && i.OwnerId == me);
+        if (imp is null)
+            return NotFound(new { message = "Không tìm thấy lần nhập này." });
+        if (imp.Status != ImportStatus.Failed)
+            return BadRequest(new { message = "Bài này đang được xử lý, chưa thể bỏ." });
+
+        _db.TrackImports.Remove(imp);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
     // ---------- Hàm dùng chung ----------
+
+    private static ImportDto ToImportDto(TrackImport i) => new()
+    {
+        Id = i.Id,
+        Url = i.Url,
+        Title = i.Title,
+        Status = i.Status.ToString().ToLowerInvariant(),
+        Error = i.Error,
+        CreatedAt = i.CreatedAt
+    };
 
     private static TrackDto ToDto(Track t) => new()
     {
