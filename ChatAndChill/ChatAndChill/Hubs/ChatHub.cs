@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using System.Reflection;
+using ChatAndChill.Services;
 
 namespace ChatAndChill.Hubs;
 
@@ -14,13 +15,15 @@ namespace ChatAndChill.Hubs;
 public class ChatHub : Hub
 {
     private readonly AppDbContext _db;
+    private readonly RoomService _rooms;
 
     // userId -> số kết nối đang mở (nhiều tab = nhiều kết nối)
     private static readonly ConcurrentDictionary<int, int> Online = new();
 
-    public ChatHub(AppDbContext db)
+    public ChatHub(AppDbContext db, RoomService rooms)
     {
         _db = db;
+        _rooms = rooms;
     }
 
     public static string UserGroup(int userId) => $"user-{userId}";
@@ -46,6 +49,7 @@ public class ChatHub : Hub
         {
             Online.TryRemove(new KeyValuePair<int, int>(userId, count));
             await NotifyPresenceAsync(userId, "UserOffline");
+            await LeaveAllRoomsAsync(userId);
         }
 
         await base.OnDisconnectedAsync(exception);
@@ -189,6 +193,156 @@ public class ChatHub : Hub
             callerName
         });
     }
+    // ================= PHÒNG NGHE NHẠC =================
+    // Sự kiện server -> client: RoomState (RoomStateDto), RoomInvite (RoomInviteDto), RoomLeft (roomId)
+
+    private async Task<RoomMember> GetRoomMemberAsync(int userId)
+    {
+        var info = await _db.Users
+            .Where(x => x.Id == userId)
+            .Select(x => new { Name = x.DisplayName ?? x.Username, x.AvatarUrl })
+            .FirstAsync();
+        return new RoomMember(userId, info.Name, info.AvatarUrl);
+    }
+
+    private Task BroadcastRoomAsync(RoomStateDto state)
+    {
+        var groups = state.Members.Select(m => UserGroup(m.UserId)).ToList();
+        return Clients.Groups(groups).SendAsync("RoomState", state);
+    }
+
+    // Chạy một thao tác của RoomService, đổi RoomException thành HubException, rồi phát trạng thái mới
+    private async Task ApplyRoomAsync(Func<RoomStateDto?> action)
+    {
+        RoomStateDto? state;
+        try { state = action(); }
+        catch (RoomException ex) { throw new HubException(ex.Message); }
+
+        if (state is not null) await BroadcastRoomAsync(state);
+    }
+
+    private async Task LeaveRoomInternalAsync(string roomId, int userId)
+    {
+        var state = _rooms.Leave(roomId, userId);
+        await Clients.Group(UserGroup(userId)).SendAsync("RoomLeft", roomId);
+        if (state is not null) await BroadcastRoomAsync(state);
+    }
+
+    // Mỗi người chỉ ở một phòng một lúc
+    private async Task LeaveAllRoomsAsync(int userId, string? except = null)
+    {
+        foreach (var id in _rooms.RoomIdsOf(userId).Where(id => id != except))
+            await LeaveRoomInternalAsync(id, userId);
+    }
+
+    public async Task<RoomStateDto> CreateRoom(string? name)
+    {
+        var me = Context.User!.GetUserId();
+        await LeaveAllRoomsAsync(me);
+
+        var state = _rooms.Create(await GetRoomMemberAsync(me), name ?? "");
+        await BroadcastRoomAsync(state);
+        return state;
+    }
+
+    // Mời bạn bè vào phòng (chỉ mời được người đã là bạn)
+    public async Task InviteToRoom(string roomId, List<int> friendIds)
+    {
+        var me = Context.User!.GetUserId();
+        if (friendIds is null || friendIds.Count == 0) return;
+
+        var ids = friendIds.Distinct().Take(20).ToList();
+        var validIds = await _db.Friendships
+            .Where(f => f.Status == FriendshipStatus.Accepted
+                        && ((f.RequesterId == me && ids.Contains(f.AddresseeId))
+                            || (f.AddresseeId == me && ids.Contains(f.RequesterId))))
+            .Select(f => f.RequesterId == me ? f.AddresseeId : f.RequesterId)
+            .ToListAsync();
+
+        List<int> added;
+        string roomName;
+        try { added = _rooms.Invite(roomId, me, validIds, out roomName); }
+        catch (RoomException ex) { throw new HubException(ex.Message); }
+        if (added.Count == 0) return;
+
+        var inviterName = await _db.Users
+            .Where(x => x.Id == me)
+            .Select(x => x.DisplayName ?? x.Username)
+            .FirstAsync();
+
+        var groups = added.Select(UserGroup).ToList();
+        await Clients.Groups(groups).SendAsync("RoomInvite", new RoomInviteDto
+        {
+            RoomId = roomId,
+            RoomName = roomName,
+            InviterId = me,
+            InviterName = inviterName
+        });
+    }
+
+    public async Task<RoomStateDto> JoinRoom(string roomId)
+    {
+        var me = Context.User!.GetUserId();
+        await LeaveAllRoomsAsync(me, except: roomId);
+
+        RoomStateDto state;
+        try { state = _rooms.Join(roomId, await GetRoomMemberAsync(me)); }
+        catch (RoomException ex) { throw new HubException(ex.Message); }
+
+        await BroadcastRoomAsync(state);
+        return state;
+    }
+
+    public Task LeaveRoom(string roomId)
+        => LeaveRoomInternalAsync(roomId, Context.User!.GetUserId());
+
+    // Lấy lại trạng thái phòng (dùng khi mới tải lại trang hoặc nối lại SignalR)
+    public RoomStateDto? GetRoomState(string roomId)
+    {
+        var me = Context.User!.GetUserId();
+        return _rooms.IsMember(roomId, me) ? _rooms.GetState(roomId) : null;
+    }
+
+    // Mọi thành viên đều thêm được bài từ kho chung
+    public async Task RoomAddTrack(string roomId, int trackId)
+    {
+        var me = Context.User!.GetUserId();
+
+        var t = await _db.Tracks
+            .Where(x => x.Id == trackId)
+            .Select(x => new { x.Title, x.Artist, x.DurationSeconds })
+            .FirstOrDefaultAsync();
+        if (t is null) throw new HubException("Không tìm thấy bài hát.");
+
+        await ApplyRoomAsync(() => _rooms.AddTrack(
+            roomId, me, new RoomTrack(trackId, t.Title, t.Artist, t.DurationSeconds, me)));
+    }
+
+    public Task RoomRemoveTrack(string roomId, int index)
+        => ApplyRoomAsync(() => _rooms.RemoveTrack(roomId, Context.User!.GetUserId(), index));
+
+    // Các thao tác dưới đây chỉ chủ phòng làm được (RoomService kiểm tra)
+    public Task RoomMoveTrack(string roomId, int from, int to)
+        => ApplyRoomAsync(() => _rooms.MoveTrack(roomId, Context.User!.GetUserId(), from, to));
+
+    public Task RoomPlay(string roomId, int? index)
+        => ApplyRoomAsync(() => _rooms.Play(roomId, Context.User!.GetUserId(), index));
+
+    public Task RoomPause(string roomId)
+        => ApplyRoomAsync(() => _rooms.Pause(roomId, Context.User!.GetUserId()));
+
+    public Task RoomSeek(string roomId, double seconds)
+        => ApplyRoomAsync(() => _rooms.Seek(roomId, Context.User!.GetUserId(), seconds));
+
+    public Task RoomNext(string roomId)
+        => ApplyRoomAsync(() => _rooms.Next(roomId, Context.User!.GetUserId()));
+
+    public Task RoomPrev(string roomId)
+        => ApplyRoomAsync(() => _rooms.Prev(roomId, Context.User!.GetUserId()));
+
+    // Mọi client báo "bài index đã hết"; chỉ lần báo đầu tiên có tác dụng
+    public Task RoomTrackEnded(string roomId, int index)
+        => ApplyRoomAsync(() => _rooms.TrackEnded(roomId, Context.User!.GetUserId(), index));
 
     // Client gọi khi đã xem tới tin messageId trong cuộc trò chuyện
     public async Task MarkRead(int conversationId, long messageId)

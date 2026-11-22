@@ -6,6 +6,7 @@ import { ProfilePage } from './pages/profile-page';
 import { UserProfilePage } from './pages/user-profile-page';
 import { MusicPage } from './pages/music-page';
 import { ThemePage } from './pages/theme-page';
+import { RoomPage } from './pages/room-page';
 
 export const routes: Routes = [
   { path: 'music', component: MusicPage, canActivate: [authGuard] },
@@ -15,5 +16,6 @@ export const routes: Routes = [
   { path: 'profile/:id', component: UserProfilePage, canActivate: [authGuard] },
   { path: '', pathMatch: 'full', redirectTo: 'chat' },
   { path: 'music/theme', component: ThemePage, canActivate: [authGuard] },
+  { path: 'rooms', component: RoomPage, canActivate: [authGuard] },
   { path: '**', redirectTo: 'chat' },
 ];

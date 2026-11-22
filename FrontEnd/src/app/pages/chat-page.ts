@@ -43,6 +43,7 @@ const errorText = (err: HttpErrorResponse, fallback: string): string =>
                   <div class="me-actions">
             <button type="button" class="ghost" routerLink="/profile">Hồ sơ</button>
                         <button type="button" class="ghost" routerLink="/music" title="Thư viện nhạc">🎵</button> 
+                                    <button type="button" class="ghost" routerLink="/rooms" title="Phòng nghe nhạc">🎧</button>
             <button type="button" class="ghost" (click)="logout()">Đăng xuất</button>
           </div>
         </div>
@@ -520,7 +521,6 @@ export class ChatPage implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.subs.unsubscribe();
     this.typingTimers.forEach(t => clearTimeout(t));
-    void this.hub.stop();
     clearTimeout(this.incomingTimer);
     void this.call.leave();
   }

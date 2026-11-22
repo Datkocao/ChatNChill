@@ -58,3 +58,38 @@ export interface ReadDto {
   userId: number;
   lastReadMessageId: number | null;
 }
+
+// ===== Phòng nghe nhạc (khớp với RoomDtos.cs) =====
+export interface RoomTrackDto {
+  trackId: number;
+  title: string;
+  artist: string | null;
+  durationSeconds: number | null;
+  addedById: number;
+}
+
+export interface RoomMemberDto {
+  userId: number;
+  name: string;
+  avatarUrl: string | null;
+}
+
+export interface RoomStateDto {
+  id: string;
+  name: string;
+  hostId: number;
+  members: RoomMemberDto[];
+  queue: RoomTrackDto[];
+  currentIndex: number;      // -1 = chưa có bài nào
+  isPlaying: boolean;
+  positionSeconds: number;   // vị trí phát tại thời điểm serverTimeMs
+  serverTimeMs: number;
+  version: number;           // bản cũ hơn thì bỏ qua
+}
+
+export interface RoomInviteDto {
+  roomId: string;
+  roomName: string;
+  inviterId: number;
+  inviterName: string;
+}

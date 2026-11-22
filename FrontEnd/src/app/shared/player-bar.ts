@@ -22,23 +22,28 @@ import { PlayerThemeService } from '../core/player-theme.service';
           </div>
         </div>
 
-        <div class="center">
+               <div class="center">
           <div class="buttons">
-            <button (click)="p.toggleShuffle()" [class.on]="p.shuffle()" title="Ngẫu nhiên">🔀</button>
-            <button (click)="p.prev()" title="Bài trước">⏮</button>
-            <button class="play" (click)="p.toggle()" [disabled]="p.loading()">
+            @if (!p.inRoom()) {
+              <button (click)="p.toggleShuffle()" [class.on]="p.shuffle()" title="Ngẫu nhiên">🔀</button>
+            }
+            <button (click)="p.prev()" [disabled]="!p.canControl()" title="Bài trước">⏮</button>
+            <button class="play" (click)="p.toggle()"
+                    [disabled]="p.loading() || (!p.canControl() && p.isPlaying())">
               {{ p.isPlaying() ? '⏸' : '▶' }}
             </button>
-            <button (click)="p.next()" title="Bài sau">⏭</button>
-            <button (click)="cycleRepeat()" [class.on]="p.repeatMode() !== 'off'" title="Lặp">
-              {{ repeatIcon() }}
-            </button>
-            @if (p.repeatMode() !== 'off') {
-              <input class="limit" type="number" min="1" placeholder="∞"
-                     [value]="p.repeatLimit() ?? ''" (change)="onLimit($event)"
-                     title="Số lần lặp thêm (để trống = vô hạn)" />
-              @if (p.repeatLimit() !== null) {
-                <span class="count">{{ p.repeatsDone() }}/{{ p.repeatLimit() }}</span>
+            <button (click)="p.next()" [disabled]="!p.canControl()" title="Bài sau">⏭</button>
+            @if (!p.inRoom()) {
+              <button (click)="cycleRepeat()" [class.on]="p.repeatMode() !== 'off'" title="Lặp">
+                {{ repeatIcon() }}
+              </button>
+              @if (p.repeatMode() !== 'off') {
+                <input class="limit" type="number" min="1" placeholder="∞"
+                       [value]="p.repeatLimit() ?? ''" (change)="onLimit($event)"
+                       title="Số lần lặp thêm (để trống = vô hạn)" />
+                @if (p.repeatLimit() !== null) {
+                  <span class="count">{{ p.repeatsDone() }}/{{ p.repeatLimit() }}</span>
+                }
               }
             }
           </div>
@@ -47,7 +52,8 @@ import { PlayerThemeService } from '../core/player-theme.service';
             <input type="range" min="0" step="1"
                    [max]="p.duration() || 0" [value]="p.currentTime()"
                    [style.--pct]="pct()"
-                   (input)="onSeek($event)" />
+                   [disabled]="!p.canControl()"
+                   (input)="onSeek($event)" (change)="onSeekCommit($event)" />
             <span>{{ fmt(p.duration()) }}</span>
           </div>
         </div>
@@ -93,6 +99,8 @@ import { PlayerThemeService } from '../core/player-theme.service';
     }
     .buttons button.on { opacity: 1; background: color-mix(in srgb, var(--pt-accent, #3b6df0) 30%, transparent); }
     .buttons button.play { font-size: 22px; opacity: 1; }
+    .buttons button[disabled] { opacity: .3; cursor: default; }
+    .seek input[disabled] { opacity: .5; }
         .limit {
       width: 44px; height: 24px; box-sizing: border-box; padding: 0 6px;
       font: inherit; font-size: 12px; text-align: center; color: inherit;
@@ -215,8 +223,13 @@ export class PlayerBar {
     this.p.setRepeat(this.p.repeatMode(), n >= 1 ? n : null);
   }
 
-  protected onSeek(ev: Event): void {
+    protected onSeek(ev: Event): void {
+    if (this.p.inRoom()) return;
     this.p.seek(+(ev.target as HTMLInputElement).value);
+  }
+
+  protected onSeekCommit(ev: Event): void {
+    if (this.p.inRoom()) this.p.seek(+(ev.target as HTMLInputElement).value);
   }
 
   protected onVolume(ev: Event): void {

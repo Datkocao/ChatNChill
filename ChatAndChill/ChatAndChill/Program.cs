@@ -55,6 +55,7 @@ namespace ChatAndChill
             builder.Services.Configure<ToolsOptions>(builder.Configuration.GetSection("Tools"));
             builder.Services.AddSingleton<TrackImportQueue>();
             builder.Services.AddSingleton<YoutubeSearchService>();
+            builder.Services.AddSingleton<RoomService>();
             builder.Services.AddHostedService<TrackImportWorker>();
 
             builder.Services.AddCors(options =>
