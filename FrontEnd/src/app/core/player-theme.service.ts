@@ -22,10 +22,14 @@ export class PlayerThemeService {
     () => JSON.stringify(this.theme()) !== JSON.stringify(this.saved()),
   );
   readonly saving = signal(false);
+    // theme tạm (ví dụ giao diện của chủ phòng); null = dùng theme của mình
+  private readonly override = signal<PlayerTheme | null>(null);
+  // theme đang hiển thị thật trên thanh nhạc và biến CSS
+  readonly effective = computed(() => this.override() ?? this.theme());
 
   constructor() {
     // mỗi khi theme đổi: chỉ ghi biến CSS lên <html>, không lưu
-    effect(() => this.apply(this.theme()));
+        effect(() => this.apply(this.effective()));
 
     // đăng nhập thì tải theme từ server, đăng xuất thì về mặc định
     effect(() => {
@@ -85,6 +89,23 @@ export class PlayerThemeService {
       return true;
     } catch {
       return false;
+    }
+  }
+
+    /** Đặt theme tạm (null = bỏ theme tạm, quay về theme của mình). Không lưu gì. */
+  setOverride(t: PlayerTheme | null): void {
+    this.override.set(t ? { ...t } : null);
+  }
+
+  /** Lấy theme đã lưu của một người dùng khác; chưa lưu hoặc lỗi thì trả mặc định. */
+  async fetchOf(userId: number): Promise<PlayerTheme> {
+    try {
+      const res = await firstValueFrom(
+        this.http.get<{ theme: unknown | null }>(`${API_URL}/api/player-theme/${userId}`),
+      );
+      return res.theme == null ? { ...DEFAULT_THEME } : sanitizeTheme(res.theme);
+    } catch {
+      return { ...DEFAULT_THEME };
     }
   }
 

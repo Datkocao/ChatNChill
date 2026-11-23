@@ -6,6 +6,7 @@ import { API_URL } from './config';
 import { RoomInviteDto, RoomStateDto, RoomTrackDto } from './models';
 import { TrackDto } from './music-api.service';
 import { PlayerService, RoomHooks } from './player.service';
+import { PlayerThemeService } from './player-theme.service';
 
 const ROOM_KEY = 'chatandchill.roomId';
 const SYNC_INTERVAL_MS = 2000;
@@ -41,6 +42,7 @@ export class RoomService {
   private player = inject(PlayerService);
   private auth = inject(AuthService);
   private http = inject(HttpClient);
+  private themes = inject(PlayerThemeService);
 
   readonly room = signal<RoomStateDto | null>(null);
   readonly invites = signal<RoomInviteDto[]>([]);
@@ -53,6 +55,7 @@ export class RoomService {
   });
 
   private receivedAt = 0;   // giờ (đồng hồ máy mình) lúc nhận RoomState gần nhất
+  private themeHostId: number | null = null;   // chủ phòng mà theme tạm đang lấy theo
   private timer: ReturnType<typeof setInterval> | undefined;
 
   private readonly hooks: RoomHooks = {
@@ -168,6 +171,7 @@ export class RoomService {
     this.room.set(s);
     this.receivedAt = performance.now();
     saveRoomId(s.id);
+    this.syncTheme(s);
 
     if (first) {
       this.player.roomEnter(this.hooks);
@@ -184,6 +188,25 @@ export class RoomService {
     this.room.set(null);
     clearInterval(this.timer);
     this.player.roomExit();
+    this.themeHostId = null;
+    this.themes.setOverride(null);
+  }
+
+  // Dùng theme của chủ phòng; chủ phòng đổi thì tải theme của người mới
+  private syncTheme(s: RoomStateDto): void {
+    if (this.themeHostId === s.hostId) return;
+    this.themeHostId = s.hostId;
+
+    if (s.hostId === this.auth.user()?.userId) {
+      this.themes.setOverride(null);   // mình là chủ phòng: dùng theme của mình
+      return;
+    }
+
+    const hostId = s.hostId;
+    void this.themes.fetchOf(hostId).then(t => {
+      // bỏ kết quả cũ nếu trong lúc chờ đã rời phòng hoặc đổi chủ phòng
+      if (this.themeHostId === hostId && this.room()) this.themes.setOverride(t);
+    });
   }
 
   private applyToPlayer(): void {

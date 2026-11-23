@@ -6,6 +6,7 @@ import { RouterLink } from '@angular/router';
 import { AuthService } from '../core/auth.service';
 import { API_URL } from '../core/config';
 import { ProfileApiService, ProfileDto } from '../core/profile-api.service';
+import { ProfilePlayerCard } from '../shared/profile-player-card';
 
 const MAX_AVATAR = 5 * 1024 * 1024; // khớp backend
 const MAX_COVER = 8 * 1024 * 1024;
@@ -17,10 +18,14 @@ const errorText = (err: HttpErrorResponse, fallback: string): string =>
 @Component({
   selector: 'app-profile-page',
   standalone: true,
-  imports: [FormsModule, RouterLink, DatePipe],
+  imports: [FormsModule, RouterLink, DatePipe, ProfilePlayerCard],
   template: `
     <div class="wrap">
       <a class="back" routerLink="/chat">← Quay lại chat</a>
+      
+
+      <div class="layout">
+      <div class="main">
 
       @if (profile(); as p) {
         <div class="card">
@@ -105,11 +110,21 @@ const errorText = (err: HttpErrorResponse, fallback: string): string =>
         }
       }
     </div>
+    <div class="player-area"><app-profile-player-card /></div>
+      </div>
+    </div>
   `,
   styles: [
     `
       :host { display: block; min-height: 100vh; background: #f2f4f8; }
-      .wrap { max-width: 640px; margin: 0 auto; padding: 16px 16px calc(16px + var(--player-h, 0px)); }
+      .wrap { padding: 16px 16px calc(16px + var(--player-h, 0px)); }
+      .layout { display: flex; align-items: flex-start; gap: 16px; }
+      .main { flex: 0 0 640px; max-width: 100%; min-width: 0; }
+      .player-area { flex: 1; min-width: 0; min-height: 300px; }
+      @media (max-width: 1000px) {
+        .layout { flex-direction: column; align-items: stretch; }
+        .main { flex: none; max-width: 640px; }
+      }
       .back { display: inline-block; margin-bottom: 12px; color: #3b6df0; text-decoration: none; }
       .card { background: #fff; border-radius: 14px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
 

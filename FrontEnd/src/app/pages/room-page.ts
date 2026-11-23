@@ -10,6 +10,7 @@ import { RoomService } from '../core/room.service';
   selector: 'app-room-page',
   imports: [RouterLink],
   template: `
+        <div class="page" [class.themed]="rooms.room() !== null">
     <div class="wrap">
       <div class="top">
         <a routerLink="/chat">← Chat</a>
@@ -117,9 +118,11 @@ import { RoomService } from '../core/room.service';
         </div>
       }
     </div>
+    </div>
   `,
-  styles: `
-    :host { display: block; min-height: 100vh; padding-bottom: calc(24px + var(--player-h, 0px)); background: #f2f4f8; }
+    styles: `
+    :host { display: block; }
+    .page { min-height: 100vh; box-sizing: border-box; padding-bottom: calc(24px + var(--player-h, 0px)); background: #f2f4f8; }
     .wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
     .top { display: flex; justify-content: space-between; margin-bottom: 8px; }
     .top a { color: #3b6df0; text-decoration: none; }
@@ -145,6 +148,24 @@ import { RoomService } from '../core/room.service';
     .danger { background: #fdecea; color: #c62828; border: 0; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
     button[disabled] { opacity: .45; cursor: default; }
     .error { color: #c62828; }
+
+    /* trong phòng: dùng giao diện (biến --pt-*) của chủ phòng */
+    .page.themed {
+      color: var(--pt-text);
+      background:
+        linear-gradient(rgba(0, 0, 0, var(--pt-overlay, 0)), rgba(0, 0, 0, var(--pt-overlay, 0))),
+        var(--pt-bg-image, none) center / cover no-repeat,
+        var(--pt-bg);
+    }
+    .page.themed .top a { color: var(--pt-accent); }
+    .page.themed small, .page.themed .muted, .page.themed .idx { color: inherit; opacity: .7; }
+    .page.themed section { background: color-mix(in srgb, var(--pt-text) 8%, transparent); border-color: color-mix(in srgb, var(--pt-text) 20%, transparent); }
+    .page.themed .box { border-color: color-mix(in srgb, var(--pt-text) 20%, transparent); }
+    .page.themed .row { border-bottom-color: color-mix(in srgb, var(--pt-text) 15%, transparent); }
+    .page.themed .row.track.cur { background: color-mix(in srgb, var(--pt-accent) 30%, transparent); }
+    .page.themed .chip { background: color-mix(in srgb, var(--pt-accent) 30%, transparent); color: var(--pt-text); }
+    .page.themed .plain { color: inherit; border-color: color-mix(in srgb, var(--pt-text) 30%, transparent); }
+    .page.themed .primary { background: color-mix(in srgb, var(--pt-accent) 35%, transparent); color: var(--pt-text); border: 1px solid var(--pt-accent); }
   `,
 })
 export class RoomPage {

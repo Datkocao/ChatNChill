@@ -7,7 +7,7 @@ import { PlayerThemeService } from '../core/player-theme.service';
   selector: 'app-player-bar',
   template: `
     @if (p.currentTrack(); as t) {
-            @let th = theme.theme();
+            @let th = theme.effective();
       <div class="bar" [class.expanded]="th.layout === 'expanded'">
                 @if (th.showWave) {
           <canvas #wave class="wave"></canvas>
@@ -146,7 +146,7 @@ export class PlayerBar {
     // Effect 1: báo chiều cao thanh nhạc cho cả app (0 khi không có bài đang phát)
     effect(() => {
       const on = this.p.currentTrack() !== null;
-      const h = this.theme.theme().layout === 'expanded' ? 128 : 72;
+      const h = this.theme.effective().layout === 'expanded' ? 128 : 72;
       document.documentElement.style.setProperty('--player-h', on ? `${h}px` : '0px');
     });
 
@@ -154,7 +154,7 @@ export class PlayerBar {
     effect((onCleanup) => {
       const cv = this.wave()?.nativeElement;
       const playing = this.p.isPlaying();
-      const color = this.theme.theme().accent;
+      const color = this.theme.effective().accent;
       if (!cv) return;
 
       const g = cv.getContext('2d');
