@@ -21,9 +21,6 @@ public class ProfileController : ControllerBase
     private const int MaxDisplayName = 50;
     private const int MaxBio = 300;
 
-    private static readonly HashSet<string> ImageExts =
-        new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
-
     private readonly AppDbContext _db;
     private readonly R2StorageService _r2;
     private readonly IHubContext<ChatHub> _hub;
@@ -132,14 +129,14 @@ public class ProfileController : ControllerBase
             return BadRequest(new { message = $"Ảnh quá lớn (tối đa {maxBytes / 1024 / 1024} MB)." });
 
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (!ImageExts.Contains(ext) || !await LooksLikeImageAsync(file))
+        if (!ImageFiles.Extensions.Contains(ext) || !await ImageFiles.LooksLikeImageAsync(file))
             return BadRequest(new { message = "Chỉ nhận ảnh jpg, png, gif, webp." });
 
         // tên ngẫu nhiên, không dùng tên gốc
         var newKey = $"{folderName}/{Guid.NewGuid():N}{ext}";
         await using (var stream = file.OpenReadStream())
         {
-            await _r2.UploadAsync(newKey, stream, ContentTypeFor(ext));
+            await _r2.UploadAsync(newKey, stream, ImageFiles.ContentTypeFor(ext));
         }
 
         var oldKey = isAvatar ? user.AvatarKey : user.CoverKey;
@@ -169,31 +166,6 @@ public class ProfileController : ControllerBase
 
         if (isAvatar) await NotifyProfileChangedAsync(user);
         return Ok(ToDto(user));
-    }
-
-    private static string ContentTypeFor(string ext) => ext switch
-    {
-        ".jpg" or ".jpeg" => "image/jpeg",
-        ".png" => "image/png",
-        ".gif" => "image/gif",
-        ".webp" => "image/webp",
-        _ => "application/octet-stream"
-    };
-
-    // Kiểm tra vài byte đầu file có đúng là ảnh không, tránh đổi đuôi file khác thành .jpg
-    private static async Task<bool> LooksLikeImageAsync(IFormFile file)
-    {
-        var h = new byte[12];
-        await using var s = file.OpenReadStream();
-        var n = await s.ReadAsync(h, 0, h.Length);
-        if (n < 12) return false;
-
-        var jpg = h[0] == 0xFF && h[1] == 0xD8 && h[2] == 0xFF;
-        var png = h[0] == 0x89 && h[1] == 0x50 && h[2] == 0x4E && h[3] == 0x47;
-        var gif = h[0] == 0x47 && h[1] == 0x49 && h[2] == 0x46 && h[3] == 0x38;
-        var webp = h[0] == 0x52 && h[1] == 0x49 && h[2] == 0x46 && h[3] == 0x46
-                && h[8] == 0x57 && h[9] == 0x45 && h[10] == 0x42 && h[11] == 0x50;
-        return jpg || png || gif || webp;
     }
 
 
